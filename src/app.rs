@@ -4,7 +4,10 @@ use glam::{Vec2, Vec3, vec2, vec3};
 use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
-use crate::{camera, camera_controller, gl, graphics, input, scene, shader_data};
+use crate::{
+    camera, camera_controller, gl, graphics, input, scene, scene_renderer::SceneRenderer,
+    shader_data,
+};
 
 const VERT_SHADER_SRC: &str = "
 #version 460 core
@@ -50,6 +53,8 @@ impl App {
         scene.load_data_from_file(std::path::Path::new("assets/scenes/scene.glb"));
 
         let scene_shader = scene::Scene::create_test_shader();
+
+        let mut scene_renderer = SceneRenderer::new(&scene);
 
         'main_loop: loop {
             let delta_time = self.get_delta_time().as_secs_f32();
@@ -116,36 +121,38 @@ impl App {
                 gl::Clear(gl::DEPTH_BUFFER_BIT | gl::COLOR_BUFFER_BIT);
             }
 
-            let model_matrix_location = scene_shader.find_uniform_location("u_model_matrix");
+            scene_renderer.render();
 
-            for root_node_ref in scene.test_get_root_nodes_slice() {
-                let node = scene.get_node(root_node_ref);
+            // let model_matrix_location = scene_shader.find_uniform_location("u_model_matrix");
 
-                scene_shader.set_uniform_mat4(
-                    model_matrix_location,
-                    &node.transform.model_matrix().to_cols_array(),
-                );
+            // for root_node_ref in scene.test_get_root_nodes_slice() {
+            //     let node = scene.get_node(root_node_ref);
 
-                let mesh = scene.get_mesh(&node.mesh_ref);
+            //     scene_shader.set_uniform_mat4(
+            //         model_matrix_location,
+            //         &node.transform.model_matrix().to_cols_array(),
+            //     );
 
-                render_mesh(mesh, &scene_shader);
+            //     let mesh = scene.get_mesh(&node.mesh_ref);
 
-                for child_ref in node.children() {
-                    let child = scene.get_node(child_ref);
+            //     render_mesh(mesh, &scene_shader);
 
-                    let world_space_matrix =
-                        node.transform.model_matrix() * child.transform.model_matrix();
+            //     for child_ref in node.children() {
+            //         let child = scene.get_node(child_ref);
 
-                    scene_shader.set_uniform_mat4(
-                        model_matrix_location,
-                        &world_space_matrix.to_cols_array(),
-                    );
+            //         let world_space_matrix =
+            //             node.transform.model_matrix() * child.transform.model_matrix();
 
-                    let child_mesh = scene.get_mesh(&child.mesh_ref);
+            //         scene_shader.set_uniform_mat4(
+            //             model_matrix_location,
+            //             &world_space_matrix.to_cols_array(),
+            //         );
 
-                    render_mesh(child_mesh, &scene_shader);
-                }
-            }
+            //         let child_mesh = scene.get_mesh(&child.mesh_ref);
+
+            //         render_mesh(child_mesh, &scene_shader);
+            //     }
+            // }
 
             self.imgui_sdl_platform.prepare_frame(
                 &mut self.imgui_context,

@@ -1,7 +1,7 @@
 use crate::gl;
 
 #[repr(u32)]
-#[derive(Clone, Copy, Hash)]
+#[derive(Clone, Copy, Hash, PartialEq, Debug)]
 pub enum CullMode {
     Disabled = 0u32,
     Back = gl::BACK,
@@ -10,27 +10,17 @@ pub enum CullMode {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, Hash)]
+#[derive(Clone, Copy, Hash, PartialEq, Debug)]
 pub enum DepthTestMode {
     LessEqual = gl::LEQUAL,
     Equal = gl::EQUAL,
 }
 
-#[derive(Hash)]
+#[derive(Hash, PartialEq, Debug, Clone, Copy)]
 pub struct MaterialProperties {
-    cull_mode: CullMode,
-    depth_test_mode: DepthTestMode,
-    depth_writing_enabled: bool,
-}
-
-impl Default for MaterialProperties {
-    fn default() -> Self {
-        Self {
-            cull_mode: CullMode::Back,
-            depth_test_mode: DepthTestMode::LessEqual,
-            depth_writing_enabled: true,
-        }
-    }
+    pub cull_mode: CullMode,
+    pub depth_test_mode: DepthTestMode,
+    pub depth_writing_enabled: bool,
 }
 
 impl MaterialProperties {
@@ -41,6 +31,9 @@ impl MaterialProperties {
             depth_writing_enabled: depth_writing,
         }
     }
+
+    pub const DEFAULT: MaterialProperties =
+        MaterialProperties::new(CullMode::Back, DepthTestMode::LessEqual, true);
 }
 
 impl DepthTestMode {

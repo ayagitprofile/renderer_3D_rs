@@ -20,7 +20,7 @@ use std::{
     vec::Vec,
 };
 
-struct NamedShader {
+pub struct NamedShader {
     pub name: String,
     pub shader: Shader,
 }
@@ -32,6 +32,7 @@ pub struct Scene {
     materials: Vec<Material>,
     mesh_nodes: Vec<MeshNode>,
     mesh_node_roots: Vec<MeshNodeID>,
+    shader_source_data: Vec<ShaderSource>,
 }
 
 #[repr(C)]
@@ -50,7 +51,7 @@ pub struct ResourceHandle<T> {
 
 pub type MeshNodeID = ResourceHandle<MeshNode>;
 pub type MeshID = ResourceHandle<Mesh>;
-pub type ShaderID = ResourceHandle<Shader>;
+pub type ShaderID = ResourceHandle<NamedShader>;
 pub type TextureID = ResourceHandle<Texture2D>;
 pub type MaterialID = ResourceHandle<Material>;
 
@@ -91,7 +92,7 @@ pub struct Material {
 impl Scene {
     pub fn load_data_from_file(&mut self, scene_file: &std::path::Path) {
         let _timer =
-            timer::ScopedTimer::new(&format!("Loading scene: {}", scene_file.to_str().unwrap()));
+            timer::ScopedTimer::start(&format!("Loading scene: {}", scene_file.to_str().unwrap()));
 
         let (document, buffers, images) = gltf::import(scene_file).expect(&format!(
             "Failed to load scene from {}",
@@ -99,7 +100,7 @@ impl Scene {
         ));
 
         println!(
-            "Loading scene: {} | Mesh count: {} | Material count: {} | Number of nodes: {}",
+            "[Scene] Loading scene: {} | Mesh count: {} | Material count: {} | Number of nodes: {}",
             scene_file.display(),
             document.meshes().len(),
             document.materials().len(),
@@ -153,6 +154,8 @@ impl Scene {
             self.mesh_node_roots
                 .push(ResourceHandle::new(self.mesh_nodes.len() - 1));
         }
+
+        self.shader_source_data.clear();
     }
 
     fn add_mesh_node(
@@ -165,8 +168,6 @@ impl Scene {
         let mesh = node
             .mesh()
             .expect("Filtered nodes should always have a mesh");
-
-        println!("Loading node: {}", node.name().unwrap_or_default());
 
         debug_assert_eq!(mesh.primitives().len(), 1);
 
@@ -182,11 +183,20 @@ impl Scene {
 
         let mesh_handle = ResourceHandle::new(self.meshes.len() - 1);
 
+        let shader_handle = Scene::DEFAULT_SHADER_ID;
+
+        self.materials.push(Material {
+            material_properties: MaterialProperties::DEFAULT,
+            shader_ref: shader_handle,
+        });
+
+        let material_handle = ResourceHandle::new(self.materials.len() - 1);
+
         self.mesh_nodes.push(MeshNode::new(
             transform,
             children,
             mesh_handle,
-            ResourceHandle::new(0),
+            material_handle,
         ));
 
         ResourceHandle::new(self.mesh_nodes.len() - 1)
@@ -249,6 +259,14 @@ impl Scene {
         &self.mesh_nodes[id.index]
     }
 
+    pub fn get_shader(&self, id: &ShaderID) -> &NamedShader {
+        &self.shaders[id.index]
+    }
+
+    pub fn get_material(&self, id: &MaterialID) -> &Material {
+        &self.materials[id.index]
+    }
+
     pub fn create_test_shader() -> Shader {
         ShaderSource::load_and_compile(std::path::Path::new("assets/shaders/scene_shader.glsl"))
     }
@@ -258,13 +276,38 @@ impl Scene {
     }
 
     pub fn new() -> Self {
-        Self {
+        let mut scene = Scene {
             meshes: Vec::<Mesh>::new(),
             shaders: Vec::<NamedShader>::new(),
             textures: Vec::<Texture2D>::new(),
             materials: Vec::<Material>::new(),
             mesh_nodes: Vec::<MeshNode>::new(),
             mesh_node_roots: Vec::<MeshNodeID>::new(),
+            shader_source_data: Vec::<ShaderSource>::new(),
+        };
+
+        scene.shaders.push(NamedShader {
+            name: "Default shader".to_string(),
+            shader: Scene::create_test_shader(),
+        });
+
+        scene
+    }
+
+    pub fn load_shaders(&mut self, shader_file_paths: &[std::path::PathBuf]) {
+        self.shader_source_data
+            .reserve_exact(shader_file_paths.len());
+        self.shaders.reserve_exact(shader_file_paths.len());
+
+        for path in shader_file_paths {
+            let shader_source = ShaderSource::load_from_file(path.as_path());
+            let named_shader = NamedShader {
+                shader: shader_source.compile(),
+                name: shader_source.name().to_string(),
+            };
+
+            self.shader_source_data.push(shader_source);
+            self.shaders.push(named_shader);
         }
     }
 
@@ -273,6 +316,9 @@ impl Scene {
         vertex::Attrib::NORMAL,
         vertex::Attrib::UV,
     ];
+
+    // temporary
+    const DEFAULT_SHADER_ID: ResourceHandle<NamedShader> = ResourceHandle::new(0);
 }
 
 impl SceneVertex {
@@ -308,7 +354,7 @@ fn flip_triangle_winding(indices: &mut [u32]) {
 }
 
 impl<T> ResourceHandle<T> {
-    pub fn new(index: usize) -> Self {
+    pub const fn new(index: usize) -> Self {
         Self {
             index,
             _marker: PhantomData,
