@@ -1,0 +1,23 @@
+[package]
+name = "renderer_rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sdl2 = { version = "0.37", features = ["bundled"] }
+
+imgui = "0.12.0"
+imgui-sdl2-support = "0.13.0"
+imgui-opengl-renderer-rs = "0.12"
+glow = "0.18.0"
+
+smol_str = "0.3.6"
+smallvec = "1.15.2"
+
+stb_image = "0.3.0"
+glam = { version = "0.30", features = ["bytemuck"] }
+bytemuck = { version = "1.25.2", features = ["derive"] }
+gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
+
+[build-dependencies]
+gl_generator = "0.14"
