@@ -10,6 +10,7 @@ use crate::{
         texture::Texture2D,
         vertex,
     },
+    shader_source::ShaderSource,
     timer,
     transform::Transform,
 };
@@ -213,7 +214,7 @@ impl Scene {
                 vertex.uv = uv;
             }
         } else {
-            println!("Warning: Mesh has no TEXCOORD_0. Defaulting UVs to (0,0).");
+            println!("Warning: Mesh has no UV_0 channel. Defaulting UVs to (0,0).");
         }
 
         if let Some(normals) = reader.read_normals() {
@@ -249,10 +250,7 @@ impl Scene {
     }
 
     pub fn create_test_shader() -> Shader {
-        graphics::shader::Shader::compile_from_strings(
-            TEST_SHADER_VERT_SOURCE,
-            TEST_SHADER_FRAG_SOURCE,
-        )
+        ShaderSource::load_and_compile(std::path::Path::new("assets/shaders/scene_shader.glsl"))
     }
 
     pub fn get_mesh(&self, id: &MeshID) -> &Mesh {
@@ -308,46 +306,6 @@ fn flip_triangle_winding(indices: &mut [u32]) {
         indices[i + 2] = tmp;
     }
 }
-
-const TEST_SHADER_VERT_SOURCE: &str = "
-#version 460 core
-layout (location = 0) in vec3 a_position;
-layout (location = 1) in vec3 a_normal;
-layout (location = 2) in vec2 a_uv;
-
-layout(std430, binding = 0) buffer shared_data_buffer {
-    mat4 camera_vp_matrix;
-    mat4 camera_view_matrix;
-    mat4 camera_projection_matrix;
-    vec4 camera_position;
-    vec4 camera_forward;
-} shared_data;
-
-uniform mat4 u_model_matrix = mat4(1.0);
-
-out vec2 v_uv;
-out vec3 v_normal;
-
-void main() {
-    vec4 position_ws = u_model_matrix * vec4(a_position, 1);
-    gl_Position = shared_data.camera_vp_matrix * position_ws;
-
-    v_uv = a_uv;
-    v_normal = a_normal;
-}
-";
-
-const TEST_SHADER_FRAG_SOURCE: &str = "
-#version 460 core
-layout (location = 0) out vec4 out_color;
-
-in vec2 v_uv;
-in vec3 v_normal;
-
-void main() {
-    out_color = vec4(v_normal, 1);
-}
-";
 
 impl<T> ResourceHandle<T> {
     pub fn new(index: usize) -> Self {

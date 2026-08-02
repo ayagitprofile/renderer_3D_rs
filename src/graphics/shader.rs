@@ -1,3 +1,8 @@
+use std::{
+    ffi::{CStr, CString},
+    str::FromStr,
+};
+
 use crate::gl;
 
 struct UniformData {
@@ -33,13 +38,23 @@ impl Shader {
         }
     }
 
-    pub fn compile_from_strings(vertex_source: &str, fragment_source: &str) -> Self {
+    pub fn compile_from_c_strings(vertex_source: &CStr, fragment_source: &CStr) -> Self {
         let id = compile_shader(vertex_source, fragment_source);
 
         Self {
             id: id,
             uniform_data_storage: Shader::load_uniform_data(id),
         }
+    }
+
+    pub fn compile_from_strings(vertex_source: &str, fragment_source: &str) -> Self {
+        let v_cstr =
+            CString::new(vertex_source.trim_end_matches('\0')).expect("String conversion failure");
+
+        let f_cstr = CString::new(fragment_source.trim_end_matches('\0'))
+            .expect("String conversion failure");
+
+        Shader::compile_from_c_strings(v_cstr.as_c_str(), f_cstr.as_c_str())
     }
 
     pub fn find_uniform_location(&self, name: &str) -> i32 {
@@ -151,18 +166,16 @@ impl Shader {
     }
 }
 
-fn compile_sub_shader(shader_type: u32, source: &str) -> u32 {
+fn compile_sub_shader(shader_type: u32, source: &CStr) -> u32 {
     use std::ffi::c_char;
 
     const COMPILATION_SUCCESS: i32 = gl::TRUE as i32;
 
     let shader;
 
-    let cstr = std::ffi::CString::new(source).unwrap();
-
     unsafe {
         shader = gl::CreateShader(shader_type);
-        gl::ShaderSource(shader, 1, &cstr.as_ptr(), std::ptr::null());
+        gl::ShaderSource(shader, 1, &source.as_ptr(), std::ptr::null());
         gl::CompileShader(shader);
 
         let mut comp_status = 0;
@@ -187,7 +200,8 @@ fn compile_sub_shader(shader_type: u32, source: &str) -> u32 {
                 "Shader compilation failed: {}",
                 String::from_utf8_lossy(bytes)
             );
-            println!("Source dump:\n {}", source);
+
+            println!("Source dump:\n {}", source.to_string_lossy());
 
             return 0;
         }
@@ -196,7 +210,7 @@ fn compile_sub_shader(shader_type: u32, source: &str) -> u32 {
     return shader;
 }
 
-fn compile_shader(vertex_source: &str, fragment_source: &str) -> u32 {
+fn compile_shader(vertex_source: &CStr, fragment_source: &CStr) -> u32 {
     use std::ffi::c_char;
 
     let vertex_sub = compile_sub_shader(gl::VERTEX_SHADER, vertex_source);
