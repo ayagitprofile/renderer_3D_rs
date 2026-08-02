@@ -1,4 +1,5 @@
 use glam::Mat4;
+use smol_str::SmolStr;
 
 use crate::{
     graphics::{
@@ -9,21 +10,14 @@ use crate::{
         shader::Shader,
         texture::Texture2D,
         vertex,
-    },
-    shader_source::ShaderSource,
-    timer,
-    transform::Transform,
+    }, scene_data::{Material, MaterialID, MeshChildrenStorage, MeshID, MeshNode, MeshNodeID, NamedShader, ResourceHandle, ShaderID}, shader_source::ShaderSource, timer, transform::Transform,
 };
 use std::{
+    clone,
     collections::{HashMap, HashSet},
     marker::PhantomData,
     vec::Vec,
 };
-
-pub struct NamedShader {
-    pub name: String,
-    pub shader: Shader,
-}
 
 pub struct Scene {
     meshes: Vec<Mesh>,
@@ -43,61 +37,12 @@ struct SceneVertex {
     pub uv: [f32; 2],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResourceHandle<T> {
-    index: usize,
-    _marker: PhantomData<fn() -> T>,
-}
-
-pub type MeshNodeID = ResourceHandle<MeshNode>;
-pub type MeshID = ResourceHandle<Mesh>;
-pub type ShaderID = ResourceHandle<NamedShader>;
-pub type TextureID = ResourceHandle<Texture2D>;
-pub type MaterialID = ResourceHandle<Material>;
-
-type MeshChildrenStorage = smallvec::SmallVec<[MeshNodeID; 3]>;
-
-pub struct MeshNode {
-    pub transform: Transform,
-    children_refs: MeshChildrenStorage,
-    pub mesh_ref: MeshID,
-    pub material_ref: MaterialID,
-}
-
-impl MeshNode {
-    pub fn children(&self) -> &[MeshNodeID] {
-        self.children_refs.as_slice()
-    }
-
-    pub fn new(
-        transform: Transform,
-        children_refs: smallvec::SmallVec<[MeshNodeID; 3]>,
-        mesh_ref: MeshID,
-        material_ref: MaterialID,
-    ) -> Self {
-        Self {
-            transform,
-            children_refs,
-            mesh_ref,
-            material_ref,
-        }
-    }
-}
-
-pub struct Material {
-    pub material_properties: MaterialProperties,
-    pub shader_ref: ShaderID,
-}
-
 impl Scene {
     pub fn load_data_from_file(&mut self, scene_file: &std::path::Path) {
-        let _timer =
-            timer::ScopedTimer::start(&format!("Loading scene: {}", scene_file.to_str().unwrap()));
+        let _timer = timer::ScopedTimer::start(&format!("Loading scene: {}", scene_file.to_str().unwrap()));
 
-        let (document, buffers, images) = gltf::import(scene_file).expect(&format!(
-            "Failed to load scene from {}",
-            scene_file.display()
-        ));
+        let (document, buffers, images) =
+            gltf::import(scene_file).expect(&format!("Failed to load scene from {}", scene_file.display()));
 
         println!(
             "[Scene] Loading scene: {} | Mesh count: {} | Material count: {} | Number of nodes: {}",
@@ -107,8 +52,7 @@ impl Scene {
             document.nodes().len()
         );
 
-        let vertex_layout =
-            graphics::vertex::VertexLayout::from_attribs(&Scene::VERTEX_LAYOUT_ATTRIBS);
+        let vertex_layout = graphics::vertex::VertexLayout::from_attribs(&Scene::VERTEX_LAYOUT_ATTRIBS);
 
         let mut nodes: std::vec::Vec<gltf::Node> = document
             .nodes()
@@ -136,20 +80,12 @@ impl Scene {
             for child in node.children() {
                 discovered_nodes.insert(child.index());
 
-                debug_assert!(
-                    child.children().len() == 0,
-                    "Unsupported node hierarchy depth"
-                );
+                debug_assert!(child.children().len() == 0, "Unsupported node hierarchy depth");
 
-                child_refs.push(self.add_mesh_node(
-                    &child,
-                    MeshChildrenStorage::new(),
-                    &buffers,
-                    &vertex_layout,
-                ));
+                child_refs.push(self.load_mesh_node(&child, MeshChildrenStorage::new(), &buffers, &vertex_layout));
             }
 
-            let _ = self.add_mesh_node(&node, child_refs, &buffers, &vertex_layout);
+            let _ = self.load_mesh_node(&node, child_refs, &buffers, &vertex_layout);
 
             self.mesh_node_roots
                 .push(ResourceHandle::new(self.mesh_nodes.len() - 1));
@@ -158,16 +94,14 @@ impl Scene {
         self.shader_source_data.clear();
     }
 
-    fn add_mesh_node(
+    fn load_mesh_node(
         &mut self,
         node: &gltf::Node,
         children: MeshChildrenStorage,
         buffers: &[gltf::buffer::Data],
         vertex_layout: &vertex::VertexLayout,
     ) -> ResourceHandle<MeshNode> {
-        let mesh = node
-            .mesh()
-            .expect("Filtered nodes should always have a mesh");
+        let mesh = node.mesh().expect("Filtered nodes should always have a mesh");
 
         debug_assert_eq!(mesh.primitives().len(), 1);
 
@@ -175,31 +109,47 @@ impl Scene {
 
         let transform = transform_from_node(node);
 
-        self.meshes.push(Scene::mesh_from_primitive(
-            &primitive,
-            buffers,
-            vertex_layout,
-        ));
+        self.meshes
+            .push(Scene::mesh_from_primitive(&primitive, buffers, vertex_layout));
 
         let mesh_handle = ResourceHandle::new(self.meshes.len() - 1);
 
-        let shader_handle = Scene::DEFAULT_SHADER_ID;
+        let material_handle = self.create_material(primitive.material().name().unwrap_or_default());
 
-        self.materials.push(Material {
-            material_properties: MaterialProperties::DEFAULT,
-            shader_ref: shader_handle,
-        });
+        let mesh_node_handle = self.add_mesh_node(MeshNode::new(transform, children, mesh_handle, material_handle));
 
-        let material_handle = ResourceHandle::new(self.materials.len() - 1);
+        mesh_node_handle
+    }
 
-        self.mesh_nodes.push(MeshNode::new(
-            transform,
-            children,
-            mesh_handle,
-            material_handle,
-        ));
+    fn add_material(&mut self, material: Material) -> MaterialID {
+        self.materials.push(material);
+        MaterialID::new(self.materials.len() - 1)
+    }
 
-        ResourceHandle::new(self.mesh_nodes.len() - 1)
+    fn add_mesh_node(&mut self, node: MeshNode) -> MeshNodeID {
+        self.mesh_nodes.push(node);
+        MeshNodeID::new(self.mesh_nodes.len() - 1)
+    }
+
+    fn create_material(&mut self, material_name: &str) -> MaterialID {
+        let shader_handle = ShaderID::new(
+            self.shaders
+                .iter()
+                .position(|el| el.name == material_name)
+                .unwrap_or(0),
+        );
+
+        let shader_name = &self.get_shader(&shader_handle).name;
+
+        let mat_props = if let Some(data) = self.shader_source_data.iter().find(|el| el.name() == shader_name) {
+            *data.mat_props()
+        } else {
+            MaterialProperties::DEFAULT
+        };
+
+        let material_handle = self.add_material(Material::new(shader_handle, &mat_props, shader_name));
+
+        material_handle
     }
 
     fn mesh_from_primitive(
@@ -295,8 +245,7 @@ impl Scene {
     }
 
     pub fn load_shaders(&mut self, shader_file_paths: &[std::path::PathBuf]) {
-        self.shader_source_data
-            .reserve_exact(shader_file_paths.len());
+        self.shader_source_data.reserve_exact(shader_file_paths.len());
         self.shaders.reserve_exact(shader_file_paths.len());
 
         for path in shader_file_paths {
@@ -311,13 +260,9 @@ impl Scene {
         }
     }
 
-    pub const VERTEX_LAYOUT_ATTRIBS: [vertex::Attrib; 3] = [
-        vertex::Attrib::POSITION,
-        vertex::Attrib::NORMAL,
-        vertex::Attrib::UV,
-    ];
+    pub const VERTEX_LAYOUT_ATTRIBS: [vertex::Attrib; 3] =
+        [vertex::Attrib::POSITION, vertex::Attrib::NORMAL, vertex::Attrib::UV];
 
-    // temporary
     const DEFAULT_SHADER_ID: ResourceHandle<NamedShader> = ResourceHandle::new(0);
 }
 
@@ -332,9 +277,7 @@ impl SceneVertex {
 }
 
 fn transform_from_node(node: &gltf::Node) -> Transform {
-    Transform::from_model_matrix(Transform::model_rh_to_lh(mat4_from_gltf(
-        node.transform().matrix(),
-    )))
+    Transform::from_model_matrix(Transform::model_rh_to_lh(mat4_from_gltf(node.transform().matrix())))
 }
 
 fn mat4_from_gltf(m: [[f32; 4]; 4]) -> Mat4 {
@@ -353,11 +296,3 @@ fn flip_triangle_winding(indices: &mut [u32]) {
     }
 }
 
-impl<T> ResourceHandle<T> {
-    pub const fn new(index: usize) -> Self {
-        Self {
-            index,
-            _marker: PhantomData,
-        }
-    }
-}

@@ -50,9 +50,10 @@ impl App {
         let mut camera_controller = camera_controller::CameraController::new();
 
         let mut scene = scene::Scene::new();
-        scene.load_data_from_file(std::path::Path::new("assets/scenes/scene.glb"));
 
-        let scene_shader = scene::Scene::create_test_shader();
+        scene.load_shaders(&[std::path::Path::new("assets/shaders/monkey_mat.glsl").to_path_buf()]);
+
+        scene.load_data_from_file(std::path::Path::new("assets/scenes/scene.glb"));
 
         let mut scene_renderer = SceneRenderer::new(&scene);
 

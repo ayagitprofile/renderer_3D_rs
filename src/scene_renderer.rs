@@ -5,15 +5,14 @@ use crate::{
     graphics::{
         material_properties::{self, CullMode, DepthTestMode, MaterialProperties},
         mesh::{self, Mesh},
-        shader::Shader,
     },
-    scene::{Material, MeshNodeID, Scene},
+    scene::Scene,
+    scene_data::{Material, MeshNodeID},
 };
 
 pub struct SceneRenderer<'a> {
     scene: &'a Scene,
     current_mat_props: material_properties::MaterialProperties,
-    test_scene_shader: Shader,
 }
 
 impl<'a> SceneRenderer<'a> {
@@ -21,7 +20,6 @@ impl<'a> SceneRenderer<'a> {
         let renderer = SceneRenderer {
             scene: scene,
             current_mat_props: MaterialProperties::DEFAULT,
-            test_scene_shader: Scene::create_test_shader(),
         };
 
         set_depth_test_mode(renderer.current_mat_props.depth_test_mode);
