@@ -15,6 +15,7 @@ pub enum WrappingMode {
 }
 
 #[repr(u32)]
+#[derive(Clone, Copy)]
 pub enum StorageFormat {
     R = gl::R8,
     RG = gl::RG8,
@@ -37,6 +38,12 @@ pub enum StorageFormat {
     Depth32FStencil = gl::DEPTH32F_STENCIL8,
 }
 
+impl StorageFormat {
+    pub fn to_gl_format(&self) -> u32 {
+        *self as u32
+    }
+}
+
 pub trait Texture {
     fn id(&self) -> u32;
 
@@ -48,9 +55,7 @@ pub trait Texture {
         let (min, mag) = match filtering {
             FilteringMode::Nearest => (gl::NEAREST, gl::NEAREST),
             FilteringMode::Bilinear => (gl::LINEAR, gl::LINEAR),
-            FilteringMode::Trilinear | FilteringMode::AnisotropicX16 => {
-                (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR)
-            }
+            FilteringMode::Trilinear | FilteringMode::AnisotropicX16 => (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR),
         };
 
         let id = self.id();
@@ -74,6 +79,12 @@ pub trait Texture {
         unsafe {
             gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_S, mode as i32);
             gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_T, mode as i32);
+        }
+    }
+
+    fn make_resident<T: Texture>(texture: &T) {
+        unsafe {
+            gl::MakeTextureHandleResidentARB(texture.bindless_handle());
         }
     }
 }
@@ -155,13 +166,41 @@ impl Texture2D {
         }
     }
 
-    pub fn load_from_file(
-        path: &std::path::Path,
+    pub fn create_single_color_texture(
+        width: i32,
+        height: i32,
         storage_format: StorageFormat,
+        color: &[f32; 4],
         filtering: FilteringMode,
-    ) -> Self {
-        let path_c_str =
-            std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).expect("Incorrect path");
+    ) -> Texture2D {
+        let mut texture = Texture2D::create_empty_texture();
+
+        unsafe {
+            gl::TextureStorage2D(texture.id, 1, storage_format.to_gl_format(), width, height);
+            gl::ClearTexImage(
+                texture.id,
+                0,
+                gl::RGBA,
+                gl::FLOAT,
+                color.as_ptr() as *const std::ffi::c_void,
+            );
+            gl::GenerateTextureMipmap(texture.id);
+        }
+
+        texture.set_wrapping_mode(WrappingMode::Repeat);
+        texture.set_filtering_mode(filtering);
+
+        unsafe {
+            texture.bindless_handle = gl::GetTextureHandleARB(texture.id);
+        }
+
+        <Texture2D as Texture>::make_resident(&texture);
+
+        texture
+    }
+
+    pub fn load_from_file(path: &std::path::Path, storage_format: StorageFormat, filtering: FilteringMode) -> Self {
+        let path_c_str = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).expect("Incorrect path");
         let str_ptr: *const i8 = path_c_str.as_ptr();
 
         let mut texture = Texture2D::create_empty_texture();
@@ -186,7 +225,7 @@ impl Texture2D {
             gl::TextureStorage2D(
                 id,
                 calulate_mip_count(texture.width, texture.height),
-                storage_format as u32,
+                storage_format.to_gl_format(),
                 texture.width,
                 texture.height,
             );
@@ -211,17 +250,14 @@ impl Texture2D {
             stb_image::stbi_image_free(data as *mut std::ffi::c_void);
 
             texture.bindless_handle = gl::GetTextureHandleARB(id);
-            make_resident(&texture);
+            // make_resident(&texture);
+            <Texture2D as Texture>::make_resident(&texture);
         }
 
         return texture;
     }
 
-    pub fn load_from_memory(
-        data: &[u8],
-        storage_format: StorageFormat,
-        filtering: FilteringMode,
-    ) -> Texture2D {
+    pub fn load_from_memory(data: &[u8], storage_format: StorageFormat, filtering: FilteringMode) -> Texture2D {
         let mut texture = Texture2D::create_empty_texture();
 
         unsafe {
@@ -248,7 +284,7 @@ impl Texture2D {
             gl::TextureStorage2D(
                 id,
                 calulate_mip_count(texture.width, texture.height),
-                storage_format as u32,
+                storage_format.to_gl_format(),
                 width,
                 height,
             );
@@ -273,7 +309,7 @@ impl Texture2D {
             stb_image::stbi_image_free(data as *mut std::ffi::c_void);
 
             texture.bindless_handle = gl::GetTextureHandleARB(id);
-            make_resident(&texture);
+            <Texture2D as Texture>::make_resident(&texture);
         }
 
         return texture;
@@ -295,15 +331,6 @@ impl Texture2D {
         };
 
         return texture;
-    }
-}
-
-fn make_resident<T>(texture: &T)
-where
-    T: Texture,
-{
-    unsafe {
-        gl::MakeTextureHandleResidentARB(texture.bindless_handle());
     }
 }
 

@@ -7,8 +7,6 @@ mod gl;
 mod graphics;
 mod input;
 mod scene;
-mod scene_data;
-mod scene_renderer;
 mod shader_data;
 mod shader_source;
 mod timer;
@@ -16,6 +14,5 @@ mod transform;
 
 fn main() {
     let mut app = app::App::new();
-    let source = ShaderSource::load_from_file(std::path::Path::new("assets/shaders/shader.glsl"));
     app.run();
 }

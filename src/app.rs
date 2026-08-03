@@ -1,41 +1,7 @@
-use std::collections::HashMap;
-
-use glam::{Vec2, Vec3, vec2, vec3};
 use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
-use crate::{
-    camera, camera_controller, gl, graphics, input, scene, scene_renderer::SceneRenderer,
-    shader_data,
-};
-
-const VERT_SHADER_SRC: &str = "
-#version 460 core
-layout (location = 0) in vec3 a_pos;
-layout (location = 1) in vec2 a_uv;
-layout(std430, binding = 0) buffer shared_data_buffer {
-    mat4 camera_vp_matrix;
-    mat4 camera_view_matrix;
-    mat4 camera_projection_matrix;
-    vec4 camera_position;
-    vec4 camera_forward;
-} shared_data;
-out vec2 v_uv;
-void main() {
-    vec4 position_os = vec4(a_pos, 1);
-    gl_Position = shared_data.camera_vp_matrix * position_os;
-    v_uv = a_uv;
-}
-";
-
-const FRAG_SHADER_SRC: &str = "
-#version 460 core
-layout (location = 0) out vec4 out_color;
-in vec2 v_uv;
-void main() {
-    out_color = vec4(v_uv, 1, 1);
-}
-";
+use crate::{camera, camera_controller, gl, graphics, input, scene::{self, scene::Scene}, shader_data};
 
 impl App {
     pub fn run(&mut self) {
@@ -49,21 +15,19 @@ impl App {
 
         let mut camera_controller = camera_controller::CameraController::new();
 
-        let mut scene = scene::Scene::new();
+        let mut scene = Scene::new();
 
         scene.load_shaders(&[std::path::Path::new("assets/shaders/monkey_mat.glsl").to_path_buf()]);
-
         scene.load_data_from_file(std::path::Path::new("assets/scenes/scene.glb"));
 
-        let mut scene_renderer = SceneRenderer::new(&scene);
+        let mut scene_renderer = scene::renderer::Renderer::new(&scene);
 
         'main_loop: loop {
             let delta_time = self.get_delta_time().as_secs_f32();
             self.input_container.new_frame();
 
             for event in self.sdl_event_pump.poll_iter() {
-                self.imgui_sdl_platform
-                    .handle_event(&mut self.imgui_context, &event);
+                self.imgui_sdl_platform.handle_event(&mut self.imgui_context, &event);
 
                 match event {
                     Event::Quit { .. } => {
@@ -86,12 +50,9 @@ impl App {
                         self.input_container.remove_pressed_mouse_button(mouse_btn);
                     }
 
-                    Event::MouseMotion {
-                        x, y, xrel, yrel, ..
-                    } => {
+                    Event::MouseMotion { x, y, xrel, yrel, .. } => {
                         self.input_container.set_cursor_position(x as f32, y as f32);
-                        self.input_container
-                            .set_mouse_delta(xrel as f32, yrel as f32);
+                        self.input_container.set_mouse_delta(xrel as f32, yrel as f32);
                     }
 
                     Event::Window { win_event, .. } => match win_event {
@@ -114,8 +75,7 @@ impl App {
 
             camera_controller.update(&mut self.camera, delta_time, input);
 
-            shader_data
-                .set_camera_matrices(&self.camera.view_matrix(), &self.camera.projection_matrix());
+            shader_data.set_camera_matrices(&self.camera.view_matrix(), &self.camera.projection_matrix());
             shader_data.upload_data();
 
             unsafe {
@@ -124,42 +84,8 @@ impl App {
 
             scene_renderer.render();
 
-            // let model_matrix_location = scene_shader.find_uniform_location("u_model_matrix");
-
-            // for root_node_ref in scene.test_get_root_nodes_slice() {
-            //     let node = scene.get_node(root_node_ref);
-
-            //     scene_shader.set_uniform_mat4(
-            //         model_matrix_location,
-            //         &node.transform.model_matrix().to_cols_array(),
-            //     );
-
-            //     let mesh = scene.get_mesh(&node.mesh_ref);
-
-            //     render_mesh(mesh, &scene_shader);
-
-            //     for child_ref in node.children() {
-            //         let child = scene.get_node(child_ref);
-
-            //         let world_space_matrix =
-            //             node.transform.model_matrix() * child.transform.model_matrix();
-
-            //         scene_shader.set_uniform_mat4(
-            //             model_matrix_location,
-            //             &world_space_matrix.to_cols_array(),
-            //         );
-
-            //         let child_mesh = scene.get_mesh(&child.mesh_ref);
-
-            //         render_mesh(child_mesh, &scene_shader);
-            //     }
-            // }
-
-            self.imgui_sdl_platform.prepare_frame(
-                &mut self.imgui_context,
-                &self.sdl_window,
-                &self.sdl_event_pump,
-            );
+            self.imgui_sdl_platform
+                .prepare_frame(&mut self.imgui_context, &self.sdl_window, &self.sdl_event_pump);
 
             let frame = self.imgui_context.new_frame();
 
@@ -205,11 +131,7 @@ impl App {
         }
 
         let window = video
-            .window(
-                "Renderer / Hold TAB to enable cursor / F1 toggle UI",
-                1280,
-                720,
-            )
+            .window("Renderer / Hold TAB to enable cursor / F1 toggle UI", 1280, 720)
             .opengl()
             .position_centered()
             .resizable()
@@ -249,10 +171,9 @@ impl App {
 
         let platform = imgui_sdl2_support::SdlPlatform::new(&mut imgui_context);
 
-        let imgui_renderer = imgui_opengl_renderer_rs::Renderer::new(&mut imgui_context, |s| {
-            video.gl_get_proc_address(s) as *const _
-        })
-        .unwrap();
+        let imgui_renderer =
+            imgui_opengl_renderer_rs::Renderer::new(&mut imgui_context, |s| video.gl_get_proc_address(s) as *const _)
+                .unwrap();
 
         sdl_context.mouse().set_relative_mouse_mode(true);
 

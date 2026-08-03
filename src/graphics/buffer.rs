@@ -8,6 +8,7 @@ pub enum BindingTarget {
     TransformFeedbackBuffer = gl::TRANSFORM_FEEDBACK_BUFFER,
 }
 
+#[derive(Clone, Copy)]
 pub enum Usage {
     Static,
     Dynamic,
@@ -42,8 +43,7 @@ impl GraphicsBuffer {
         self.byte_size
     }
 
-    pub fn allocate<T>(&mut self, slice: &[T], usage: Usage)
-    {
+    pub fn allocate<T>(&mut self, slice: &[T], usage: Usage) {
         self.byte_size = std::mem::size_of_val(slice);
         unsafe {
             gl::NamedBufferData(
@@ -77,10 +77,7 @@ impl GraphicsBuffer {
         unsafe {
             gl::CreateBuffers(1, &mut id);
         }
-        Self {
-            id: id,
-            byte_size: 0,
-        }
+        Self { id: id, byte_size: 0 }
     }
 }
 

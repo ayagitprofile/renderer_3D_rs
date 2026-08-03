@@ -48,23 +48,23 @@ impl Shader {
     }
 
     pub fn compile_from_strings(vertex_source: &str, fragment_source: &str) -> Self {
-        let v_cstr =
-            CString::new(vertex_source.trim_end_matches('\0')).expect("String conversion failure");
+        let v_cstr = CString::new(vertex_source.trim_end_matches('\0')).expect("String conversion failure");
 
-        let f_cstr = CString::new(fragment_source.trim_end_matches('\0'))
-            .expect("String conversion failure");
+        let f_cstr = CString::new(fragment_source.trim_end_matches('\0')).expect("String conversion failure");
 
         Shader::compile_from_c_strings(v_cstr.as_c_str(), f_cstr.as_c_str())
     }
 
-    pub fn find_uniform_location(&self, name: &str) -> i32 {
+    pub fn find_uniform_location(&self, name: &str) -> Option<i32> {
         for element in &self.uniform_data_storage {
             if element.name == name {
-                return element.location;
+                return Some(element.location);
             }
         }
 
-        panic!("{}", format!("Uniform with such name: {} not found", name));
+        None
+
+        // panic!("{}", format!("Uniform with such name: {} not found", name));
     }
 
     pub fn map_texture_to_unit(&self, texture_uniform_location: i32, unit_index: i32) {
@@ -75,13 +75,7 @@ impl Shader {
 
     pub fn set_uniform_mat4(&self, location: i32, value: &[f32; 16]) {
         unsafe {
-            gl::ProgramUniformMatrix4fv(
-                self.id,
-                location,
-                1,
-                gl::FALSE,
-                value.as_ptr() as *const f32,
-            );
+            gl::ProgramUniformMatrix4fv(self.id, location, 1, gl::FALSE, value.as_ptr() as *const f32);
         }
     }
 
@@ -118,9 +112,7 @@ impl Shader {
 
             // Ignore uniforms belonging to UBOs
             if block_index != -1 {
-                println!(
-                    "[Shader] Warning: Failed to preload uniform data because UBOs are not supported"
-                );
+                println!("[Shader] Warning: Failed to preload uniform data because UBOs are not supported");
                 continue;
             }
 
@@ -185,21 +177,12 @@ fn compile_sub_shader(shader_type: u32, source: &CStr) -> u32 {
             let mut buffer: [c_char; 2048] = [0; 2048];
             let mut string_len: i32 = 0;
 
-            gl::GetShaderInfoLog(
-                shader,
-                buffer.len() as i32,
-                &mut string_len,
-                buffer.as_mut_ptr(),
-            );
+            gl::GetShaderInfoLog(shader, buffer.len() as i32, &mut string_len, buffer.as_mut_ptr());
             gl::DeleteShader(shader);
 
-            let bytes =
-                std::slice::from_raw_parts(buffer.as_ptr() as *const u8, string_len as usize);
+            let bytes = std::slice::from_raw_parts(buffer.as_ptr() as *const u8, string_len as usize);
 
-            println!(
-                "Shader compilation failed: {}",
-                String::from_utf8_lossy(bytes)
-            );
+            println!("Shader compilation failed: {}", String::from_utf8_lossy(bytes));
 
             println!("Source dump:\n {}", source.to_string_lossy());
 
@@ -237,16 +220,10 @@ fn compile_shader(vertex_source: &CStr, fragment_source: &CStr) -> u32 {
             let mut buffer: [c_char; 2048] = [0; 2048];
             let mut string_len: i32 = 0;
 
-            gl::GetShaderInfoLog(
-                shader,
-                buffer.len() as i32,
-                &mut string_len,
-                buffer.as_mut_ptr(),
-            );
+            gl::GetShaderInfoLog(shader, buffer.len() as i32, &mut string_len, buffer.as_mut_ptr());
             gl::DeleteProgram(shader);
 
-            let bytes =
-                std::slice::from_raw_parts(buffer.as_ptr() as *const u8, string_len as usize);
+            let bytes = std::slice::from_raw_parts(buffer.as_ptr() as *const u8, string_len as usize);
 
             println!("Shader linking failed: {}", String::from_utf8_lossy(bytes));
 
