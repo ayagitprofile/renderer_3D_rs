@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+};
 
 use glam::Mat4;
 use smol_str::{SmolStr, ToSmolStr};
@@ -221,7 +224,7 @@ impl Scene {
 
         let mut vertex_buffer_data: Vec<super::data::Vertex> = positions
             .iter()
-            .map(|p| super::data::Vertex::new(flip_z_axis(p), [0.0, 0.0, 0.0], [0.0, 0.0]))
+            .map(|p| super::data::Vertex::new(flip_z_axis(p), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0]))
             .collect();
 
         if let Some(uvs) = reader.read_tex_coords(0) {
@@ -238,6 +241,14 @@ impl Scene {
             }
         } else {
             println!("Error: Mesh has no normals. Defaulting normals to (0, 0, 0).");
+        }
+
+        if let Some(tangents) = reader.read_tangents() {
+            for (vertex, tangent) in vertex_buffer_data.iter_mut().zip(tangents) {
+                vertex.tangent_and_handedness = tangent;
+            }
+        } else {
+            println!("Error: Mesh has no tangents. Defaulting tangents to (0, 0, 1).");
         }
 
         let mut index_buffer_data: Vec<u32> = if let Some(indices) = reader.read_indices() {
@@ -335,10 +346,28 @@ impl Scene {
             let texture = NamedTexture {
                 texture: Scene::texture_from_gltf_image(
                     gltf_image,
-                    graphics::texture::StorageFormat::RGB16F,
+                    graphics::texture::StorageFormat::RGB,
                     graphics::texture::FilteringMode::AnisotropicX16,
                 ),
                 name: super::textures::NORMAL_TEXTURE_NAME.to_smolstr(),
+            };
+
+            added_textures.push(texture);
+        }
+        if shader
+            .find_uniform_location(super::textures::METALLIC_ROUGHNESS_TEXTURE_NAME)
+            .is_some()
+            && let Some(texture_info) = pbr.metallic_roughness_texture()
+        {
+            let gltf_image = &images[texture_info.texture().source().index()];
+
+            let texture = NamedTexture {
+                texture: Scene::texture_from_gltf_image(
+                    gltf_image,
+                    graphics::texture::StorageFormat::RGB,
+                    graphics::texture::FilteringMode::AnisotropicX16,
+                ),
+                name: super::textures::METALLIC_ROUGHNESS_TEXTURE_NAME.to_smolstr(),
             };
 
             added_textures.push(texture);
@@ -420,7 +449,7 @@ impl Scene {
                 texture: Texture2D::create_single_color_texture(
                     16,
                     16,
-                    StorageFormat::RGB16F,
+                    StorageFormat::RGB,
                     &TANGENT_SPACE_UP,
                     FilteringMode::Nearest
                 ),
@@ -539,8 +568,16 @@ impl Scene {
         &self.nodes[id.index]
     }
 
+    pub fn get_node_mut(&mut self, id: NodeID) -> &mut Node {
+        &mut self.nodes[id.index]
+    }
+
     pub fn root_node_iter(&self) -> std::slice::Iter<'_, super::resource_id::ResourceID<Node>> {
         self.node_roots.iter()
+    }
+
+    pub fn root_nodes(&self) -> &[NodeID] {
+        self.node_roots.as_slice()
     }
 }
 

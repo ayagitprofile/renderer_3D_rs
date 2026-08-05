@@ -15,8 +15,12 @@ pub type MeshID = ResourceID<Mesh>;
 pub(super) type NodeIDStorage = smallvec::SmallVec<[NodeID; 3]>;
 pub(super) type TextureIDStorage = smallvec::SmallVec<[TextureID; 3]>;
 
-pub const VERTEX_LAYOUT_ATTRIBS: [vertex::Attrib; 3] =
-    [vertex::Attrib::POSITION, vertex::Attrib::NORMAL, vertex::Attrib::UV];
+pub const VERTEX_LAYOUT_ATTRIBS: [vertex::Attrib; 4] = [
+    vertex::Attrib::POSITION,
+    vertex::Attrib::NORMAL,
+    vertex::Attrib::new(vertex::AttribFormat::F32, 4), // tangent + handedness
+    vertex::Attrib::UV,
+];
 
 pub struct NamedShader {
     pub shader: Shader,
@@ -47,14 +51,16 @@ pub struct Node {
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    pub tangent_and_handedness: [f32; 4],
     pub uv: [f32; 2],
 }
 
 impl Vertex {
-    pub const fn new(position: [f32; 3], normal: [f32; 3], uv: [f32; 2]) -> Self {
+    pub const fn new(position: [f32; 3], normal: [f32; 3], tangent_and_handedness: [f32; 4], uv: [f32; 2]) -> Self {
         Self {
             position: position,
             normal: normal,
+            tangent_and_handedness: tangent_and_handedness,
             uv: uv,
         }
     }

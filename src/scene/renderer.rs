@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use glam::Mat4;
 
 use super::{data, scene::Scene};
@@ -6,15 +8,13 @@ use crate::graphics::material_properties::{CullMode, DepthTestMode, MaterialProp
 use crate::graphics::mesh::Mesh;
 use crate::graphics::texture::Texture;
 
-pub struct Renderer<'a> {
-    scene: &'a Scene,
+pub struct Renderer {
     current_mat_props: MaterialProperties,
 }
 
-impl<'a> Renderer<'a> {
-    pub fn new(scene: &'a Scene) -> Self {
+impl Renderer {
+    pub fn new() -> Self {
         let renderer = Renderer {
-            scene: scene,
             current_mat_props: MaterialProperties::DEFAULT,
         };
 
@@ -25,36 +25,36 @@ impl<'a> Renderer<'a> {
         renderer
     }
 
-    pub fn render(&mut self) {
-        for root_node_id_ref in self.scene.root_node_iter() {
+    pub fn render(&mut self, scene: &Scene) {
+        for root_node_id_ref in scene.root_node_iter() {
             let root_node_id = *root_node_id_ref;
 
-            let node = self.scene.get_node(root_node_id);
+            let node = scene.get_node(root_node_id);
 
-            self.render_node(root_node_id, &Mat4::IDENTITY);
+            self.render_node(scene, root_node_id, &Mat4::IDENTITY);
 
             for child_id in node.children_iter() {
-                self.render_node(*child_id, node.transform.model_matrix());
+                self.render_node(scene, *child_id, node.transform.model_matrix());
             }
         }
     }
 
-    fn render_node(&mut self, child_id: data::NodeID, parent_model_matrix: &Mat4) {
-        let child = self.scene.get_node(child_id);
+    fn render_node(&self, scene: &Scene, child_id: data::NodeID, parent_model_matrix: &Mat4) {
+        let child = scene.get_node(child_id);
 
         let world_space_matrix = parent_model_matrix * child.transform.model_matrix();
 
-        let child_mesh = self.scene.get_mesh(child.mesh_id);
+        let child_mesh = scene.get_mesh(child.mesh_id);
 
-        let child_material = self.scene.get_material(child.material_id);
+        let child_material = scene.get_material(child.material_id);
 
-        self.render_mesh(child_mesh, child_material, &world_space_matrix);
+        self.render_mesh(scene, child_mesh, child_material, &world_space_matrix);
     }
 
-    fn render_mesh(&mut self, mesh: &Mesh, material: &data::Material, model_matrix: &glam::Mat4) {
+    fn render_mesh(&self, scene: &Scene, mesh: &Mesh, material: &data::Material, model_matrix: &glam::Mat4) {
         mesh.vao().bind();
 
-        let shader = self.scene.get_shader(material.shader_id);
+        let shader = scene.get_shader(material.shader_id);
         shader.bind();
 
         if let Some(location) = shader.find_uniform_location("u_model_matrix") {
@@ -62,8 +62,8 @@ impl<'a> Renderer<'a> {
         }
 
         for texture_id in material.texture_ids.iter() {
-            let texture = self.scene.get_texture(*texture_id);
-            let texture_name = self.scene.get_texture_name(*texture_id);
+            let texture = scene.get_texture(*texture_id);
+            let texture_name = scene.get_texture_name(*texture_id);
 
             shader.map_bindless_texture(
                 shader.find_uniform_location(texture_name).unwrap(),
@@ -71,7 +71,7 @@ impl<'a> Renderer<'a> {
             );
         }
 
-        self.set_mat_props(&material.material_properties);
+        // self.set_mat_props(&material.material_properties);
 
         unsafe {
             gl::DrawElements(

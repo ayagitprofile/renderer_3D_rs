@@ -13,6 +13,7 @@ use crate::{
         scene::{Scene, ShaderMaterialMapping},
     },
     shader_data,
+    transform::Transform,
 };
 
 static OPENGL_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -35,13 +36,13 @@ impl App {
             &[Path::new("assets/shaders/scene_shader.glsl").to_path_buf()],
             &[ShaderMaterialMapping::new(
                 "scene_shader",
-                &["ground_mat", "sphere_mat", "monkey_mat"],
+                &["ground_mat", "sphere_mat", "monkey_mat, brick_mat, metal_ball_mat"],
             )],
         );
 
         scene.load_data_from_file(Path::new("assets/scenes/scene.glb"));
 
-        let mut scene_renderer = scene::renderer::Renderer::new(&scene);
+        let mut scene_renderer = scene::renderer::Renderer::new();
 
         'main_loop: loop {
             if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
@@ -103,11 +104,25 @@ impl App {
             shader_data.set_camera_matrices(&self.camera.view_matrix(), &self.camera.projection_matrix());
             shader_data.upload_data();
 
+            for i in 0..scene.root_nodes().len() {
+                let node = scene.get_node_mut(scene.root_nodes()[i]);
+                let time = std::time::Instant::now()
+                    .duration_since(self.time_on_app_startup)
+                    .as_secs_f32()
+                    * 0.5;
+
+                let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
+                let r = glam::Quat::from_axis_angle(Transform::UP, time * if t.y > -0.5f32 { 1f32 } else { 0f32 });
+
+                let m = glam::Mat4::from_scale_rotation_translation(s, r, t);
+                node.transform = Transform::from_model_matrix(m);
+            }
+
             unsafe {
                 gl::Clear(gl::DEPTH_BUFFER_BIT | gl::COLOR_BUFFER_BIT);
             }
 
-            scene_renderer.render();
+            scene_renderer.render(&scene);
 
             self.imgui_sdl_platform
                 .prepare_frame(&mut self.imgui_context, &self.sdl_window, &self.sdl_event_pump);
@@ -203,7 +218,7 @@ impl App {
         sdl_context.mouse().set_relative_mouse_mode(true);
 
         let window_aspect_ratio = get_window_aspect_ratio(&window);
-
+        let now = std::time::Instant::now();
         Self {
             sdl_context: sdl_context,
             sdl_video_subsystem: video,
@@ -213,7 +228,8 @@ impl App {
             imgui_context: imgui_context,
             imgui_sdl_platform: platform,
             imgui_opengl_renderer: imgui_renderer,
-            time_last_frame: std::time::Instant::now(),
+            time_last_frame: now,
+            time_on_app_startup: now,
             input_container: input::InputContainer::new(),
             camera: camera::Camera::new(90f32, window_aspect_ratio, [0.1f32, 100f32]),
         }
@@ -241,6 +257,7 @@ pub struct App {
     imgui_opengl_renderer: imgui_opengl_renderer_rs::Renderer,
     // app data
     time_last_frame: std::time::Instant,
+    time_on_app_startup: std::time::Instant,
     input_container: input::InputContainer,
     camera: camera::Camera,
 }

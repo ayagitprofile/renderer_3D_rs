@@ -179,9 +179,11 @@ fn compile_sub_shader(shader_type: u32, source: &CStr) -> u32 {
 
             let bytes = std::slice::from_raw_parts(buffer.as_ptr() as *const u8, string_len as usize);
 
-            println!("Shader compilation failed: {}", String::from_utf8_lossy(bytes));
-
-            println!("Source dump:\n {}", source.to_string_lossy());
+            panic!(
+                "Shader compilation failed: {}\nSource dump: \n{}",
+                String::from_utf8_lossy(bytes),
+                source.to_string_lossy()
+            );
 
             return 0;
         }
