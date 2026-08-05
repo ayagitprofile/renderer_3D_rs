@@ -1,4 +1,4 @@
-use glam::{Quat, Vec2, Vec3, vec2};
+use glam::{Quat, Vec3, vec2};
 
 use crate::{
     camera::Camera,
@@ -30,11 +30,9 @@ impl CameraController {
                 .set_rotation(self.get_camera_rotation(input, delta_time));
         }
 
-        camera.transform.translate(self.get_camera_translation(
-            &camera.transform,
-            input,
-            delta_time,
-        ));
+        camera
+            .transform
+            .translate(self.get_camera_translation(&camera.transform, input, delta_time));
     }
 
     fn apply_friction(velocity: Vec3, friction: f32, delta_time: f32) -> Vec3 {
@@ -46,11 +44,7 @@ impl CameraController {
             return Vec3::ZERO;
         }
 
-        let control = if speed < STOP_SPEED {
-            STOP_SPEED
-        } else {
-            speed
-        };
+        let control = if speed < STOP_SPEED { STOP_SPEED } else { speed };
 
         let drop = control * friction * delta_time;
 
@@ -65,13 +59,7 @@ impl CameraController {
         return velocity * new_speed;
     }
 
-    fn accelerate(
-        velocity: Vec3,
-        wish_dir: Vec3,
-        wish_speed: f32,
-        accel: f32,
-        delta_time: f32,
-    ) -> Vec3 {
+    fn accelerate(velocity: Vec3, wish_dir: Vec3, wish_speed: f32, accel: f32, delta_time: f32) -> Vec3 {
         let current_speed = velocity.dot(wish_dir);
 
         let add_speed = wish_speed - current_speed;
@@ -113,20 +101,10 @@ impl CameraController {
         self.yaw += mouse_delta.x * SENSITIVITY;
         self.yaw = self.yaw.rem_euclid(360f32);
 
-        Quat::from_euler(
-            glam::EulerRot::YXZ,
-            self.yaw.to_radians(),
-            self.pitch.to_radians(),
-            0.0,
-        )
+        Quat::from_euler(glam::EulerRot::YXZ, self.yaw.to_radians(), self.pitch.to_radians(), 0.0)
     }
 
-    fn get_camera_translation(
-        &mut self,
-        camera_transform: &Transform,
-        input: Input,
-        delta_time: f32,
-    ) -> Vec3 {
+    fn get_camera_translation(&mut self, camera_transform: &Transform, input: Input, delta_time: f32) -> Vec3 {
         let speed = if input.get_key(input::Keycode::LSHIFT) {
             30f32
         } else if input.get_key(input::Keycode::LCTRL) {
@@ -175,10 +153,8 @@ impl CameraController {
             wish_dir = wish_dir.normalize();
         }
 
-        self.camera_velocity =
-            CameraController::apply_friction(self.camera_velocity, FRICTION, delta_time);
-        self.camera_velocity =
-            CameraController::accelerate(self.camera_velocity, wish_dir, speed, ACCEL, delta_time);
+        self.camera_velocity = CameraController::apply_friction(self.camera_velocity, FRICTION, delta_time);
+        self.camera_velocity = CameraController::accelerate(self.camera_velocity, wish_dir, speed, ACCEL, delta_time);
 
         self.camera_velocity * delta_time
     }

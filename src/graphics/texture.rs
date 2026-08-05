@@ -1,4 +1,4 @@
-use crate::{gl, scene::data};
+use crate::gl;
 use stb_image::stb_image;
 
 #[derive(PartialEq)]
@@ -166,7 +166,6 @@ impl Texture2D {
         data: *const std::ffi::c_void,
     ) -> Texture2D {
         let mut id = 0;
-        let handle = 0u64;
 
         let data_format = match channels {
             1 => gl::RED,
@@ -186,7 +185,6 @@ impl Texture2D {
                 height,
             );
             gl::TextureSubImage2D(id, 0, 0, 0, width, height, data_format, gl::UNSIGNED_BYTE, data);
-            // handle = gl::GetTextureHandleARB(id);
             gl::GenerateTextureMipmap(id);
         }
 

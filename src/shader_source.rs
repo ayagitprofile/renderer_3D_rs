@@ -2,11 +2,10 @@ use std::{ffi::CStr, io::Read};
 
 use crate::{
     graphics::{
-        self,
         material_properties::{CullMode, DepthTestMode, MaterialProperties},
         shader::Shader,
     },
-    timer::{ScopedTimer, Timer},
+    timer::ScopedTimer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,11 +34,7 @@ impl ShaderSource {
         let _timer = ScopedTimer::start(
             format!(
                 "Loading shader: {}",
-                file_path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_str()
-                    .unwrap_or_default()
+                file_path.file_stem().unwrap_or_default().to_str().unwrap_or_default()
             )
             .as_str(),
         );
@@ -78,11 +73,7 @@ impl ShaderSource {
         fragment_source.push_str(ShaderSource::FRAGMENT_SHADER_TYPE_MACRO);
         fragment_source.push_str(ShaderSource::ENABLE_BINDLESS_TEXTURES_DIRECTIVE);
 
-        let name = file_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let name = file_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
 
         let mut current_parsing_target = ShaderParsingTarget::None;
 
@@ -168,8 +159,7 @@ impl ShaderSource {
     }
 
     fn load_include(root_path: &std::path::Path, line: &str) -> Option<String> {
-        let path_str =
-            Self::extract_directive_value(Self::SHADER_INCLUDE_DIRECTIVE, line)?.trim_matches('"');
+        let path_str = Self::extract_directive_value(Self::SHADER_INCLUDE_DIRECTIVE, line)?.trim_matches('"');
 
         let include_path = root_path.join(path_str);
 
@@ -186,9 +176,7 @@ impl ShaderSource {
     }
 
     fn parse_z_write_command(line: &str) -> bool {
-        if let Some(command) =
-            ShaderSource::extract_directive_value(ShaderSource::SHADER_Z_WRITE_COMMAND, line)
-        {
+        if let Some(command) = ShaderSource::extract_directive_value(ShaderSource::SHADER_Z_WRITE_COMMAND, line) {
             if command.eq_ignore_ascii_case("on") {
                 return true;
             } else if command.eq_ignore_ascii_case("off") {
@@ -202,9 +190,7 @@ impl ShaderSource {
     }
 
     fn parse_z_test_command(line: &str) -> DepthTestMode {
-        if let Some(command) =
-            ShaderSource::extract_directive_value(ShaderSource::SHADER_Z_TEST_COMMAND, line)
-        {
+        if let Some(command) = ShaderSource::extract_directive_value(ShaderSource::SHADER_Z_TEST_COMMAND, line) {
             match command.to_lowercase().as_str() {
                 "lequal" | "lessequal" => return DepthTestMode::LessEqual,
                 "equal" => return DepthTestMode::Equal,
@@ -218,9 +204,7 @@ impl ShaderSource {
     }
 
     fn parse_cull_command(line: &str) -> CullMode {
-        if let Some(command) =
-            ShaderSource::extract_directive_value(ShaderSource::SHADER_CULL_COMMAND, line)
-        {
+        if let Some(command) = ShaderSource::extract_directive_value(ShaderSource::SHADER_CULL_COMMAND, line) {
             match command.to_lowercase().as_str() {
                 "back" => return CullMode::Back,
                 "front" => return CullMode::Front,
@@ -244,10 +228,7 @@ impl ShaderSource {
             "vertex" | "vert" => ShaderParsingTarget::Vertex,
             "fragment" | "frag" | "pixel" => ShaderParsingTarget::Fragment,
             _ => {
-                println!(
-                    "[ShaderSource] Warning: ignored unknown shader type: {}",
-                    line
-                );
+                println!("[ShaderSource] Warning: ignored unknown shader type: {}", line);
                 ShaderParsingTarget::None
             }
         }
@@ -267,8 +248,7 @@ impl ShaderSource {
     const VERTEX_SHADER_TYPE_MACRO: &str = "#define VERTEX_SHADER\n";
     const FRAGMENT_SHADER_TYPE_MACRO: &str = "#define FRAGMENT_SHADER\n";
 
-    const ENABLE_BINDLESS_TEXTURES_DIRECTIVE: &str =
-        "#extension GL_ARB_bindless_texture : require\n";
+    const ENABLE_BINDLESS_TEXTURES_DIRECTIVE: &str = "#extension GL_ARB_bindless_texture : require\n";
 
     const SHADER_CULL_COMMAND: &str = "Cull";
     const SHADER_Z_WRITE_COMMAND: &str = "ZWrite";

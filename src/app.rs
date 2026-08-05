@@ -7,7 +7,7 @@ use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
 use crate::{
-    camera, camera_controller, gl, graphics, input,
+    camera, camera_controller, gl, input,
     scene::{
         self,
         scene::{Scene, ShaderMaterialMapping},
@@ -228,6 +228,7 @@ impl App {
     }
 }
 
+#[allow(unused)]
 pub struct App {
     // dependencies
     sdl_context: sdl2::Sdl,
@@ -242,20 +243,6 @@ pub struct App {
     time_last_frame: std::time::Instant,
     input_container: input::InputContainer,
     camera: camera::Camera,
-}
-
-fn render_mesh(mesh: &graphics::mesh::Mesh, shader: &graphics::shader::Shader) {
-    mesh.vao().bind();
-    shader.bind();
-
-    unsafe {
-        gl::DrawElements(
-            gl::TRIANGLES,
-            mesh.index_count(),
-            mesh.index_format().to_gl_format(),
-            std::ptr::null(),
-        );
-    }
 }
 
 fn vec3_to_string(value: glam::Vec3) -> String {

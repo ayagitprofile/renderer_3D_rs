@@ -1,3 +1,4 @@
+#![allow(dead_code, unused)]
 use glam::{Mat4, Quat, Vec3};
 
 #[derive(Clone, Copy)]

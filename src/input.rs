@@ -1,3 +1,4 @@
+#![allow(unused, dead_code)]
 use std::collections::HashSet;
 
 pub type Keycode = sdl2::keyboard::Keycode;
@@ -36,10 +37,7 @@ impl<'a> Input<'a> {
     }
 
     pub fn mouse_delta(&self) -> (f32, f32) {
-        (
-            self.input_container.mouse_delta[0],
-            self.input_container.mouse_delta[1],
-        )
+        (self.input_container.mouse_delta[0], self.input_container.mouse_delta[1])
     }
 }
 
@@ -94,8 +92,6 @@ impl InputContainer {
     }
 
     pub fn as_input(&self) -> Input<'_> {
-        Input {
-            input_container: self,
-        }
+        Input { input_container: self }
     }
 }
