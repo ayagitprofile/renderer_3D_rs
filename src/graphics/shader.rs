@@ -1,7 +1,4 @@
-use std::{
-    ffi::{CStr, CString},
-    str::FromStr,
-};
+use std::ffi::{CStr, CString};
 
 use crate::gl;
 

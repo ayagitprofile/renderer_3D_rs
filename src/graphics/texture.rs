@@ -1,4 +1,4 @@
-use crate::gl;
+use crate::{gl, scene::data};
 use stb_image::stb_image;
 
 #[derive(PartialEq)]
@@ -38,6 +38,20 @@ pub enum StorageFormat {
     Depth32FStencil = gl::DEPTH32F_STENCIL8,
 }
 
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub enum PixelDataType {
+    U8 = gl::UNSIGNED_BYTE,
+    U16 = gl::UNSIGNED_SHORT,
+    U32 = gl::UNSIGNED_INT,
+}
+
+impl PixelDataType {
+    pub fn to_gl_format(&self) -> u32 {
+        *self as u32
+    }
+}
+
 impl StorageFormat {
     pub fn to_gl_format(&self) -> u32 {
         *self as u32
@@ -48,45 +62,6 @@ pub trait Texture {
     fn id(&self) -> u32;
 
     fn bindless_handle(&self) -> u64;
-
-    fn set_filtering_mode(&self, filtering: FilteringMode) {
-        const GL_TEXTURE_MAX_ANISOTROPY_EXT: u32 = 0x84FE;
-
-        let (min, mag) = match filtering {
-            FilteringMode::Nearest => (gl::NEAREST, gl::NEAREST),
-            FilteringMode::Bilinear => (gl::LINEAR, gl::LINEAR),
-            FilteringMode::Trilinear | FilteringMode::AnisotropicX16 => (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR),
-        };
-
-        let id = self.id();
-
-        unsafe {
-            gl::TextureParameteri(id, gl::TEXTURE_MIN_FILTER, min as i32);
-            gl::TextureParameteri(id, gl::TEXTURE_MAG_FILTER, mag as i32);
-
-            if filtering == FilteringMode::AnisotropicX16 {
-                gl::TextureParameterf(id, GL_TEXTURE_MAX_ANISOTROPY_EXT, 16f32);
-            }
-        }
-    }
-
-    fn set_wrapping_mode(&self, wrapping: WrappingMode) {
-        let mode = match wrapping {
-            WrappingMode::Clamp => gl::CLAMP_TO_EDGE,
-            WrappingMode::Repeat => gl::REPEAT,
-        };
-
-        unsafe {
-            gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_S, mode as i32);
-            gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_T, mode as i32);
-        }
-    }
-
-    fn make_resident<T: Texture>(texture: &T) {
-        unsafe {
-            gl::MakeTextureHandleResidentARB(texture.bindless_handle());
-        }
-    }
 }
 
 pub struct Texture2D {
@@ -105,6 +80,12 @@ impl Texture for Texture2D {
     fn bindless_handle(&self) -> u64 {
         self.bindless_handle
     }
+}
+
+fn mip_level_count(width: u32, height: u32) -> u32 {
+    assert!(width > 0 && height > 0);
+
+    width.max(height).ilog2() + 1
 }
 
 fn release_texture<T>(texture: &T)
@@ -131,7 +112,17 @@ fn calulate_mip_count(width: i32, height: i32) -> i32 {
     return 32 as i32 - max_dimension.leading_zeros() as i32;
 }
 
-fn get_internal_format(channels: i32) -> u32 {
+fn get_data_format(channels: i32) -> u32 {
+    match channels {
+        1 => gl::R8,
+        2 => gl::RG8,
+        3 => gl::RGB8,
+        4 => gl::RGBA8,
+        _ => panic!("Incorrect number of channels{}", channels),
+    }
+}
+
+fn get_data_format_srgb(channels: i32) -> u32 {
     match channels {
         1 => gl::R8,
         2 => gl::RG8,
@@ -166,6 +157,59 @@ impl Texture2D {
         }
     }
 
+    pub fn create_texture_from_memory(
+        width: i32,
+        height: i32,
+        storage_format: StorageFormat,
+        filtering: FilteringMode,
+        channels: i32,
+        data: *const std::ffi::c_void,
+    ) -> Texture2D {
+        let mut id = 0;
+        let handle = 0u64;
+
+        let data_format = match channels {
+            1 => gl::RED,
+            2 => gl::RG,
+            3 => gl::RGB,
+            4 => gl::RGBA,
+            _ => panic!(""),
+        };
+
+        unsafe {
+            gl::CreateTextures(gl::TEXTURE_2D, 1, &mut id);
+            gl::TextureStorage2D(
+                id,
+                mip_level_count(width as u32, height as u32) as i32,
+                storage_format.to_gl_format(),
+                width,
+                height,
+            );
+            gl::TextureSubImage2D(id, 0, 0, 0, width, height, data_format, gl::UNSIGNED_BYTE, data);
+            // handle = gl::GetTextureHandleARB(id);
+            gl::GenerateTextureMipmap(id);
+        }
+
+        let mut texture = Texture2D {
+            id: id,
+            width: width,
+            height: height,
+            channels: channels,
+            bindless_handle: 0,
+        };
+
+        texture.set_filtering_mode(filtering);
+        texture.set_wrapping_mode(WrappingMode::Repeat);
+
+        unsafe {
+            texture.bindless_handle = gl::GetTextureHandleARB(id);
+        }
+
+        texture.make_resident();
+
+        texture
+    }
+
     pub fn create_single_color_texture(
         width: i32,
         height: i32,
@@ -175,8 +219,18 @@ impl Texture2D {
     ) -> Texture2D {
         let mut texture = Texture2D::create_empty_texture();
 
+        texture.width = width;
+        texture.height = height;
+
         unsafe {
-            gl::TextureStorage2D(texture.id, 1, storage_format.to_gl_format(), width, height);
+            gl::TextureStorage2D(
+                texture.id,
+                mip_level_count(width as u32, height as u32) as i32,
+                storage_format.to_gl_format(),
+                width,
+                height,
+            );
+
             gl::ClearTexImage(
                 texture.id,
                 0,
@@ -184,8 +238,9 @@ impl Texture2D {
                 gl::FLOAT,
                 color.as_ptr() as *const std::ffi::c_void,
             );
-            gl::GenerateTextureMipmap(texture.id);
         }
+
+        texture.regenerate_mip_maps();
 
         texture.set_wrapping_mode(WrappingMode::Repeat);
         texture.set_filtering_mode(filtering);
@@ -194,9 +249,15 @@ impl Texture2D {
             texture.bindless_handle = gl::GetTextureHandleARB(texture.id);
         }
 
-        <Texture2D as Texture>::make_resident(&texture);
+        texture.make_resident();
 
         texture
+    }
+
+    pub fn regenerate_mip_maps(&self) {
+        unsafe {
+            gl::GenerateTextureMipmap(self.id);
+        }
     }
 
     pub fn load_from_file(path: &std::path::Path, storage_format: StorageFormat, filtering: FilteringMode) -> Self {
@@ -250,66 +311,7 @@ impl Texture2D {
             stb_image::stbi_image_free(data as *mut std::ffi::c_void);
 
             texture.bindless_handle = gl::GetTextureHandleARB(id);
-            // make_resident(&texture);
-            <Texture2D as Texture>::make_resident(&texture);
-        }
-
-        return texture;
-    }
-
-    pub fn load_from_memory(data: &[u8], storage_format: StorageFormat, filtering: FilteringMode) -> Texture2D {
-        let mut texture = Texture2D::create_empty_texture();
-
-        unsafe {
-            stb_image::stbi_set_flip_vertically_on_load(1);
-
-            let data = stb_image::stbi_load_from_memory(
-                data.as_ptr(),
-                data.len() as std::ffi::c_int,
-                &mut texture.width,
-                &mut texture.height,
-                &mut texture.channels,
-                0,
-            );
-
-            if data == std::ptr::null_mut() {
-                panic!("Failed to load embedded image");
-            }
-
-            let id = texture.id;
-            let channels = texture.channels;
-            let width = texture.width;
-            let height = texture.height;
-
-            gl::TextureStorage2D(
-                id,
-                calulate_mip_count(texture.width, texture.height),
-                storage_format.to_gl_format(),
-                width,
-                height,
-            );
-
-            gl::TextureSubImage2D(
-                id,
-                0,
-                0,
-                0,
-                width,
-                height,
-                get_input_data_format(channels),
-                gl::UNSIGNED_BYTE,
-                data as *const std::ffi::c_void,
-            );
-
-            gl::GenerateTextureMipmap(id);
-
-            texture.set_wrapping_mode(WrappingMode::Repeat);
-            texture.set_filtering_mode(filtering);
-
-            stb_image::stbi_image_free(data as *mut std::ffi::c_void);
-
-            texture.bindless_handle = gl::GetTextureHandleARB(id);
-            <Texture2D as Texture>::make_resident(&texture);
+            texture.make_resident();
         }
 
         return texture;
@@ -331,6 +333,65 @@ impl Texture2D {
         };
 
         return texture;
+    }
+
+    pub fn set_filtering_mode(&self, filtering: FilteringMode) {
+        debug_assert!(
+            self.bindless_handle == 0,
+            "Cant call functions that modify texture's sampler if the bindless handle for this texture has been generated, because the sampler becomes immutable, if you want to modify the sampler of a bindless texture, use sampler object"
+        );
+
+        const GL_TEXTURE_MAX_ANISOTROPY_EXT: u32 = 0x84FE;
+
+        let (min, mag) = match filtering {
+            FilteringMode::Nearest => (gl::NEAREST, gl::NEAREST),
+            FilteringMode::Bilinear => (gl::LINEAR, gl::LINEAR),
+            FilteringMode::Trilinear | FilteringMode::AnisotropicX16 => (gl::LINEAR_MIPMAP_LINEAR, gl::LINEAR),
+        };
+
+        let id = self.id();
+
+        unsafe {
+            gl::TextureParameteri(id, gl::TEXTURE_MIN_FILTER, min as i32);
+            gl::TextureParameteri(id, gl::TEXTURE_MAG_FILTER, mag as i32);
+
+            if filtering == FilteringMode::AnisotropicX16 {
+                gl::TextureParameterf(id, GL_TEXTURE_MAX_ANISOTROPY_EXT, 16f32);
+            }
+        }
+    }
+
+    pub fn set_wrapping_mode(&self, wrapping: WrappingMode) {
+        debug_assert!(
+            self.bindless_handle == 0,
+            "Cant call functions that modify texture's sampler if the bindless handle for this texture has been generated, because the sampler becomes immutable, if you want to modify the sampler of a bindless texture, use sampler object"
+        );
+
+        let mode = match wrapping {
+            WrappingMode::Clamp => gl::CLAMP_TO_EDGE,
+            WrappingMode::Repeat => gl::REPEAT,
+        };
+
+        unsafe {
+            gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_S, mode as i32);
+            gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_T, mode as i32);
+        }
+    }
+
+    fn make_resident(&self) {
+        debug_assert!(self.id() != 0 && self.bindless_handle() != 0);
+
+        unsafe {
+            gl::MakeTextureHandleResidentARB(self.bindless_handle());
+        }
+    }
+
+    fn make_non_resident(&self) {
+        debug_assert!(self.id() != 0 && self.bindless_handle() != 0);
+
+        unsafe {
+            gl::MakeTextureHandleNonResidentARB(self.bindless_handle());
+        }
     }
 }
 

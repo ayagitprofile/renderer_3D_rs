@@ -1,7 +1,21 @@
+use std::{
+    path::Path,
+    sync::{Mutex, OnceLock},
+};
+
 use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
-use crate::{camera, camera_controller, gl, graphics, input, scene::{self, scene::Scene}, shader_data};
+use crate::{
+    camera, camera_controller, gl, graphics, input,
+    scene::{
+        self,
+        scene::{Scene, ShaderMaterialMapping},
+    },
+    shader_data,
+};
+
+static OPENGL_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 impl App {
     pub fn run(&mut self) {
@@ -17,12 +31,23 @@ impl App {
 
         let mut scene = Scene::new();
 
-        scene.load_shaders(&[std::path::Path::new("assets/shaders/monkey_mat.glsl").to_path_buf()]);
-        scene.load_data_from_file(std::path::Path::new("assets/scenes/scene.glb"));
+        scene.load_shaders(
+            &[Path::new("assets/shaders/scene_shader.glsl").to_path_buf()],
+            &[ShaderMaterialMapping::new(
+                "scene_shader",
+                &["ground_mat", "sphere_mat", "monkey_mat"],
+            )],
+        );
+
+        scene.load_data_from_file(Path::new("assets/scenes/scene.glb"));
 
         let mut scene_renderer = scene::renderer::Renderer::new(&scene);
 
         'main_loop: loop {
+            if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
+                panic!("{}", error);
+            }
+
             let delta_time = self.get_delta_time().as_secs_f32();
             self.input_container.new_frame();
 
@@ -269,5 +294,10 @@ extern "system" fn gl_debug_callback(
             "OpenGL debug:\n  source={:#x}\n  type={:#x}\n  id={}\n  severity={:#x}\n  message={}",
             source, kind, id, severity, msg
         );
+
+        if severity == gl::DEBUG_SEVERITY_HIGH {
+            let storage = OPENGL_ERROR.get_or_init(|| Mutex::new(None));
+            *storage.lock().unwrap() = Some(msg.to_string());
+        }
     }
 }

@@ -12,6 +12,21 @@ use crate::{
     transform::Transform,
 };
 
+#[derive(Clone)]
+pub struct ShaderMaterialMapping {
+    pub shader_name: String,
+    pub associated_materials: Vec<String>,
+}
+
+impl ShaderMaterialMapping {
+    pub fn new(shader_name: &str, associated_materials: &[&str]) -> Self {
+        Self {
+            shader_name: shader_name.to_string(),
+            associated_materials: associated_materials.iter().map(|val| val.to_string()).collect(),
+        }
+    }
+}
+
 pub struct Scene {
     nodes: Vec<Node>,
     meshes: Vec<Mesh>,
@@ -21,6 +36,7 @@ pub struct Scene {
     node_roots: Vec<NodeID>,
     shader_mat_props: HashMap<SmolStr, MaterialProperties>,
     default_texture_ids: DefaultTextures,
+    shader_name_mapping: Vec<ShaderMaterialMapping>,
 }
 
 struct DefaultTextures {
@@ -98,10 +114,18 @@ impl Scene {
                     &buffers,
                     &vertex_layout,
                     &mut discovered_materials,
+                    &images,
                 ));
             }
 
-            let root_node_id = self.create_node(&node, child_refs, &buffers, &vertex_layout, &mut discovered_materials);
+            let root_node_id = self.create_node(
+                &node,
+                child_refs,
+                &buffers,
+                &vertex_layout,
+                &mut discovered_materials,
+                &images,
+            );
 
             self.add_root_node(root_node_id);
         }
@@ -116,6 +140,7 @@ impl Scene {
         buffers: &[gltf::buffer::Data],
         vertex_layout: &vertex::VertexLayout,
         discovered_materials: &mut HashMap<usize, MaterialID>,
+        images: &Vec<gltf::image::Data>,
     ) -> NodeID {
         let mesh = node.mesh().expect("Filtered nodes should always have a mesh");
 
@@ -129,8 +154,7 @@ impl Scene {
 
         let gltf_material = primitive.material();
 
-        let material_id = self.resolve_imported_material(&gltf_material, discovered_materials);
-        self.insert_required_default_textures(material_id);
+        let material_id = self.resolve_imported_material(&gltf_material, discovered_materials, images);
 
         let node_id = self.add_node(Node::new(transform, children, mesh_id, material_id));
 
@@ -141,6 +165,7 @@ impl Scene {
         &mut self,
         gltf_material: &gltf::Material,
         discovered_materials: &mut HashMap<usize, MaterialID>,
+        images: &Vec<gltf::image::Data>,
     ) -> MaterialID {
         if let Some(gltf_material_index) = gltf_material.index() {
             if let Some(existing_material) = discovered_materials.get(&gltf_material_index) {
@@ -157,14 +182,14 @@ impl Scene {
                     gltf_material.name().unwrap_or_default(),
                     gltf_material_index
                 );
-                let id = self.create_material_from_gltf(gltf_material);
+                let id = self.create_material_from_gltf(gltf_material, images);
                 discovered_materials.insert(gltf_material_index, id);
 
                 id
             }
         } else {
-            println!("[Scene] Warning: nameless or default GLTF material found, creating a duplicate material for it");
-            self.create_material_from_gltf(gltf_material)
+            println!("[Scene] Error: nameless or default GLTF material found, creating a duplicate material for it");
+            self.create_material_from_gltf(gltf_material, images)
         }
     }
 
@@ -204,7 +229,7 @@ impl Scene {
                 vertex.uv = uv;
             }
         } else {
-            println!("Warning: Mesh has no UV_0 channel. Defaulting UVs to (0,0).");
+            println!("Error: Mesh has no UV_0 channel. Defaulting UVs to (0,0).");
         }
 
         if let Some(normals) = reader.read_normals() {
@@ -212,7 +237,7 @@ impl Scene {
                 vertex.normal = flip_z_axis(&normal);
             }
         } else {
-            println!("Warning: Mesh has no normals. Defaulting normals to (0, 0, 0).");
+            println!("Error: Mesh has no normals. Defaulting normals to (0, 0, 0).");
         }
 
         let mut index_buffer_data: Vec<u32> = if let Some(indices) = reader.read_indices() {
@@ -233,17 +258,34 @@ impl Scene {
         mesh
     }
 
-    fn create_material_from_gltf(&mut self, gltf_material: &gltf::Material) -> MaterialID {
-        let material_name = gltf_material.name().unwrap_or_default();
+    fn create_material_from_gltf(
+        &mut self,
+        gltf_material: &gltf::Material,
+        images: &Vec<gltf::image::Data>,
+    ) -> MaterialID {
+        let material_name = gltf_material.name().unwrap_or_default().to_string();
 
-        let shader_id = ShaderID::new(
-            self.shaders
-                .iter()
-                .position(|el| el.name == material_name)
-                .unwrap_or(DEFAULT_SHADER_ID.index),
-        );
+        let shader_id = if let Some(mapping) = self
+            .shader_name_mapping
+            .iter()
+            .find(|mapping| mapping.associated_materials.contains(&material_name))
+        {
+            ShaderID::new(
+                self.shaders
+                    .iter()
+                    .position(|shader| shader.name == mapping.shader_name)
+                    .unwrap_or(DEFAULT_SHADER_ID.index),
+            )
+        } else {
+            DEFAULT_SHADER_ID
+        };
 
-        let pbr = gltf_material.pbr_metallic_roughness();
+        if shader_id.index == DEFAULT_SHADER_ID.index {
+            println!(
+                "[Scene] Error: shader for material: \"{}\" not found, using default shader",
+                material_name
+            );
+        }
 
         let shader_name = self.get_shader_name(shader_id);
 
@@ -257,10 +299,61 @@ impl Scene {
 
         let material_id = self.add_material(Material::new(shader_id, &mat_props, shader_name, texture_ids));
 
+        self.insert_required_default_textures(material_id);
+
+        let shader = self.get_shader(shader_id);
+
+        let pbr = gltf_material.pbr_metallic_roughness();
+
+        let mut added_textures = std::vec::Vec::new();
+
+        if shader
+            .find_uniform_location(super::textures::ALBEDO_TEXTURE_NAME)
+            .is_some()
+            && let Some(texture) = pbr.base_color_texture()
+        {
+            let gltf_image = &images[texture.texture().source().index()];
+
+            let texture = NamedTexture {
+                texture: Scene::texture_from_gltf_image(
+                    gltf_image,
+                    graphics::texture::StorageFormat::RGBA,
+                    graphics::texture::FilteringMode::AnisotropicX16,
+                ),
+                name: super::textures::ALBEDO_TEXTURE_NAME.to_smolstr(),
+            };
+
+            added_textures.push(texture);
+        }
+        if shader
+            .find_uniform_location(super::textures::NORMAL_TEXTURE_NAME)
+            .is_some()
+            && let Some(texture_info) = gltf_material.normal_texture()
+        {
+            let gltf_image = &images[texture_info.texture().source().index()];
+
+            let texture = NamedTexture {
+                texture: Scene::texture_from_gltf_image(
+                    gltf_image,
+                    graphics::texture::StorageFormat::RGB16F,
+                    graphics::texture::FilteringMode::AnisotropicX16,
+                ),
+                name: super::textures::NORMAL_TEXTURE_NAME.to_smolstr(),
+            };
+
+            added_textures.push(texture);
+        }
+
+        for texture in added_textures {
+            let id = self.add_texture(texture);
+            self.materials[material_id.index].texture_ids.push(id);
+        }
+
         material_id
     }
 
-    pub fn load_shaders(&mut self, shader_file_paths: &[std::path::PathBuf]) {
+    pub fn load_shaders(&mut self, shader_file_paths: &[std::path::PathBuf], mapping: &[ShaderMaterialMapping]) {
+        self.shader_name_mapping = mapping.to_vec();
         self.shader_mat_props.reserve(shader_file_paths.len());
         self.shaders.reserve_exact(shader_file_paths.len());
 
@@ -291,6 +384,7 @@ impl Scene {
             node_roots: Vec::<NodeID>::new(),
             shader_mat_props: HashMap::<SmolStr, MaterialProperties>::new(),
             default_texture_ids: default_texture_ids,
+            shader_name_mapping: Vec::new(),
         };
 
         scene.add_shader(NamedShader {
@@ -303,20 +397,22 @@ impl Scene {
 
     fn create_default_textures() -> (Vec<NamedTexture>, DefaultTextures) {
         const TANGENT_SPACE_UP: [f32; 4] = [0f32, 0f32, 1f32, 0f32];
-        const ALBEDO: [f32; 4] = [1f32, 0f32, 1f32, 1f32];
         const METALLIC_ROUGHNESS: [f32; 4] = [0f32, 0.5f32, 0f32, 1f32];
+
+        const EMO_TEXTURE_DATA: [[u8; 4]; 4] = [[255, 0, 255, 255], [0, 0, 0, 0], [0, 0, 0, 0], [255, 0, 255, 255]];
 
         use graphics::texture::FilteringMode;
         use graphics::texture::StorageFormat;
 
         let default_textures = std::vec![
             NamedTexture {
-                texture: Texture2D::create_single_color_texture(
-                    16,
-                    16,
-                    StorageFormat::RGBA,
-                    &ALBEDO,
-                    FilteringMode::Nearest
+                texture: Texture2D::create_texture_from_memory(
+                    2,
+                    2,
+                    StorageFormat::SRGBA,
+                    FilteringMode::Nearest,
+                    4,
+                    EMO_TEXTURE_DATA.as_ptr() as *const std::ffi::c_void
                 ),
                 name: super::textures::ALBEDO_TEXTURE_NAME.to_smolstr(),
             },
@@ -346,6 +442,37 @@ impl Scene {
             default_textures,
             DefaultTextures::new(TextureID::new(0), TextureID::new(1), TextureID::new(2)),
         )
+    }
+
+    fn texture_from_gltf_image(
+        image: &gltf::image::Data,
+        storage_format: graphics::texture::StorageFormat,
+        filtering_mode: graphics::texture::FilteringMode,
+    ) -> Texture2D {
+        use gltf::image::Format;
+
+        let channels = match image.format {
+            Format::R8 => 1,
+            Format::R8G8 => 2,
+            Format::R8G8B8 => 3,
+            Format::R8G8B8A8 => 4,
+            _ => panic!("Unsupported GLTF image format"),
+        };
+
+        let (width, height) = (image.width as i32, image.height as i32);
+
+        let data = image.pixels.as_ptr() as *const std::ffi::c_void;
+
+        let texture = graphics::texture::Texture2D::create_texture_from_memory(
+            width,
+            height,
+            storage_format,
+            filtering_mode,
+            channels,
+            data,
+        );
+
+        texture
     }
 }
 
