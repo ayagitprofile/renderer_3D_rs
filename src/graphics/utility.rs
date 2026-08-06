@@ -15,11 +15,14 @@ pub fn set_depth_writing(value: bool) {
 
 pub fn set_depth_test_mode(value: mat_props::DepthTestMode) {
     unsafe {
-        match value {
-            mat_props::DepthTestMode::Always => gl::DepthFunc(gl::ALWAYS),
-            mat_props::DepthTestMode::LessEqual => gl::DepthFunc(gl::LEQUAL),
-            mat_props::DepthTestMode::Equal => gl::DepthFunc(gl::EQUAL),
-        }
+        // match value {
+        //     mat_props::DepthTestMode::Always => gl::DepthFunc(gl::ALWAYS),
+        //     mat_props::DepthTestMode::LessEqual => gl::DepthFunc(gl::LEQUAL),
+        //     mat_props::DepthTestMode::Equal => gl::DepthFunc(gl::EQUAL),
+        //     mat_props::DepthTestMode::Less => gl::DepthFunc(gl::LESS),
+        // }
+
+        gl::DepthFunc(value.to_gl_format());
     }
 }
 

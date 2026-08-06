@@ -26,14 +26,13 @@ impl Camera {
         lh_to_rh_matrix * view_matrix_lh
     }
 
-    fn calculate_projection_matrix(
-        horizontal_fov: f32,
-        aspect_ratio: f32,
-        z_near: f32,
-        z_far: f32,
-    ) -> Mat4 {
+    fn calculate_projection_matrix(horizontal_fov: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> Mat4 {
         let vertical_fov = Camera::horizontal_to_vertical_fov(horizontal_fov, aspect_ratio);
         glam::Mat4::perspective_rh_gl(vertical_fov, aspect_ratio, z_near, z_far)
+    }
+
+    pub fn clipping_range_mut(&mut self) -> &mut [f32; 2] {
+        &mut self.clipping_range
     }
 
     pub fn new(fov: f32, aspect_ratio: f32, clipping_range: [f32; 2]) -> Self {

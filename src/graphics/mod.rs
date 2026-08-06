@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 pub mod buffer;
-pub mod frame_buffer;
+pub mod framebuffer;
 pub mod material_properties;
 pub mod mesh;
 pub mod shader;

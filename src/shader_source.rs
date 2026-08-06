@@ -226,6 +226,7 @@ impl ShaderSource {
                 "lequal" | "lessequal" => return DepthTestMode::LessEqual,
                 "equal" => return DepthTestMode::Equal,
                 "always" => return DepthTestMode::Always,
+                "less" => return DepthTestMode::Less,
                 _ => {
                     println!("Unknown ZTest command value: {}", command);
                 }

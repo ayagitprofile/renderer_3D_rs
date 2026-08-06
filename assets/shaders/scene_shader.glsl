@@ -8,8 +8,8 @@ out vec2 v_uv;
 out mat3 v_TBN;
 
 Cull Back
-ZWrite On
-ZTest LEqual
+ZWrite Off
+ZTest Equal
 
 void main() {
     vec4 position_ws = CORE_MODEL_MATRIX * vec4(CORE_ATTRIB_POSITION, 1);

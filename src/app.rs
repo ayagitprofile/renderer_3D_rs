@@ -39,7 +39,7 @@ impl App {
 
         let (window_size_x, window_size_y) = (self.sdl_window.size().0 as i32, self.sdl_window.size().1 as i32);
 
-        let mut framebuffer = graphics::frame_buffer::Framebuffer::new();
+        let mut framebuffer = graphics::framebuffer::Framebuffer::new();
 
         let depth_texture = graphics::texture::Texture2D::create_texture(
             window_size_x,
@@ -65,10 +65,22 @@ impl App {
 
         let fs_quad = FullscreenQuad::new(std::path::Path::new("assets/shaders/post_process_shader.glsl"));
 
-        if let Some(loc) = fs_quad.shader.find_uniform_location("fb_color_texture") {
+        if let Some(loc) = fs_quad
+            .shader
+            .find_uniform_location(scene::textures::FRAMEBUFFER_COLOR_TEXTURE)
+        {
             fs_quad
                 .shader
                 .map_bindless_texture(loc, color_texture.bindless_handle());
+        }
+
+        if let Some(loc) = fs_quad
+            .shader
+            .find_uniform_location(scene::textures::FRAMEBUFFER_DEPTH_TEXTURE)
+        {
+            fs_quad
+                .shader
+                .map_bindless_texture(loc, depth_texture.bindless_handle());
         }
 
         'main_loop: loop {
@@ -139,27 +151,17 @@ impl App {
             shader_data.set_camera_matrices(&self.camera.view_matrix(), &self.camera.projection_matrix());
             shader_data.upload_data();
 
-            for i in 0..scene.root_nodes().len() {
-                let node = scene.get_node_mut(scene.root_nodes()[i]);
-                let time = std::time::Instant::now()
-                    .duration_since(self.time_on_app_startup)
-                    .as_secs_f32()
-                    * 0.5;
-
-                let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
-                let r = glam::Quat::from_axis_angle(Transform::UP, time * if t.y > -0.5f32 { 1f32 } else { 0f32 });
-
-                let m = glam::Mat4::from_scale_rotation_translation(s, r, t);
-                node.transform = Transform::from_model_matrix(m);
-            }
+            let rendering_stats = scene_renderer.prepare_rendering_data(&scene, &self.camera);
 
             framebuffer.set_active_render_targets(&[0]);
             framebuffer.clear();
             framebuffer.bind();
 
+            scene_renderer.render_depth_prepass(&scene);
+
             scene_renderer.render(&scene);
 
-            graphics::frame_buffer::bind_default_framebuffer();
+            graphics::framebuffer::bind_default_framebuffer();
 
             fs_quad.render();
 
@@ -184,6 +186,10 @@ impl App {
                         let fwd = vec3_to_string(self.camera.transform.forward());
                         frame.text(format!("Position: {}", pos));
                         frame.text(format!("Forward: {}", fwd));
+                    }
+                    if frame.collapsing_header("Rendering", TreeNodeFlags::DEFAULT_OPEN) {
+                        frame.text(format!("Object count: {}", rendering_stats.total_objects));
+                        frame.text(format!("Visible objects: {}", rendering_stats.visible_objects));
                     }
                 });
 

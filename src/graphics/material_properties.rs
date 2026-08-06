@@ -14,6 +14,7 @@ pub enum CullMode {
 pub enum DepthTestMode {
     LessEqual = gl::LEQUAL,
     Equal = gl::EQUAL,
+    Less = gl::LESS,
     Always = gl::ALWAYS,
 }
 

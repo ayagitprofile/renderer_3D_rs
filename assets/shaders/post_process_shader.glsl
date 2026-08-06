@@ -19,6 +19,7 @@ void main() {
 layout(location = 0) out vec4 out_color;
 
 uniform sampler2D fb_color_texture;
+uniform sampler2D fb_depth_texture;
 uniform float u_chromatic_abberation = 0.0085;
 
 in vec2 v_uv;
@@ -62,8 +63,9 @@ vec3 vignette(vec2 uv, vec3 color, float strength)
 
 void main() {
     const vec2 uv = v_uv;
-
     vec3 color_ab = chromatic_abberation(uv, u_chromatic_abberation);
+
+    float depth = texture(fb_depth_texture, uv).r;
 
     out_color = vec4(color_ab, 1);
 }
