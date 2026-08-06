@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::DerefMut,
-};
+use std::collections::{HashMap, HashSet};
 
 use glam::Mat4;
 use smol_str::{SmolStr, ToSmolStr};
@@ -11,6 +8,7 @@ use super::data::{Material, MaterialID, MeshID, NamedShader, NamedTexture, Node,
 use crate::{
     ShaderSource,
     graphics::{self, material_properties::MaterialProperties, mesh::Mesh, shader::Shader, texture::Texture2D, vertex},
+    scene::data::AABB,
     timer,
     transform::Transform,
 };
@@ -40,6 +38,7 @@ pub struct Scene {
     shader_mat_props: HashMap<SmolStr, MaterialProperties>,
     default_texture_ids: DefaultTextures,
     shader_name_mapping: Vec<ShaderMaterialMapping>,
+    default_shader: (ShaderID, MaterialProperties),
 }
 
 struct DefaultTextures {
@@ -61,8 +60,6 @@ impl DefaultTextures {
         }
     }
 }
-
-const DEFAULT_SHADER_ID: ShaderID = ShaderID::new(0);
 
 impl Scene {
     pub fn load_data_from_file(&mut self, scene_file: &std::path::Path) {
@@ -159,7 +156,12 @@ impl Scene {
 
         let material_id = self.resolve_imported_material(&gltf_material, discovered_materials, images);
 
-        let node_id = self.add_node(Node::new(transform, children, mesh_id, material_id));
+        let min = primitive.bounding_box().min;
+        let max = primitive.bounding_box().max;
+
+        let aabb_lhs = AABB::new([min[0], min[1], -max[2]], [max[0], max[1], -min[2]]);
+
+        let node_id = self.add_node(Node::new(transform, children, mesh_id, material_id, aabb_lhs));
 
         node_id
     }
@@ -172,26 +174,14 @@ impl Scene {
     ) -> MaterialID {
         if let Some(gltf_material_index) = gltf_material.index() {
             if let Some(existing_material) = discovered_materials.get(&gltf_material_index) {
-                println!(
-                    "[Scene] Existing material found: (name: {}, id: {}), material duplication avoided\n",
-                    gltf_material.name().unwrap_or_default(),
-                    gltf_material_index
-                );
-
                 *existing_material
             } else {
-                println!(
-                    "[Scene] Found new GLTF material: (name: {}, id: {}), creating new material instance\n",
-                    gltf_material.name().unwrap_or_default(),
-                    gltf_material_index
-                );
                 let id = self.create_material_from_gltf(gltf_material, images);
                 discovered_materials.insert(gltf_material_index, id);
 
                 id
             }
         } else {
-            println!("[Scene] Error: nameless or default GLTF material found, creating a duplicate material for it");
             self.create_material_from_gltf(gltf_material, images)
         }
     }
@@ -285,18 +275,11 @@ impl Scene {
                 self.shaders
                     .iter()
                     .position(|shader| shader.name == mapping.shader_name)
-                    .unwrap_or(DEFAULT_SHADER_ID.index),
+                    .unwrap_or(self.default_shader.0.index),
             )
         } else {
-            DEFAULT_SHADER_ID
+            self.default_shader.0
         };
-
-        if shader_id.index == DEFAULT_SHADER_ID.index {
-            println!(
-                "[Scene] Error: shader for material: \"{}\" not found, using default shader",
-                material_name
-            );
-        }
 
         let shader_name = self.get_shader_name(shader_id);
 
@@ -304,7 +287,7 @@ impl Scene {
             .shader_mat_props
             .get(shader_name)
             .copied()
-            .unwrap_or(MaterialProperties::DEFAULT);
+            .unwrap_or(self.default_shader.1);
 
         let texture_ids = super::data::TextureIDStorage::new();
 
@@ -381,7 +364,7 @@ impl Scene {
         material_id
     }
 
-    pub fn load_shaders(&mut self, shader_file_paths: &[std::path::PathBuf], mapping: &[ShaderMaterialMapping]) {
+    pub fn load_cutom_shaders(&mut self, shader_file_paths: &[std::path::PathBuf], mapping: &[ShaderMaterialMapping]) {
         self.shader_name_mapping = mapping.to_vec();
         self.shader_mat_props.reserve(shader_file_paths.len());
         self.shaders.reserve_exact(shader_file_paths.len());
@@ -404,6 +387,8 @@ impl Scene {
     pub fn new() -> Self {
         let (default_textures, default_texture_ids) = Scene::create_default_textures();
 
+        let source = ShaderSource::load_from_file(std::path::Path::new("assets/shaders/scene_shader.glsl"));
+
         let mut scene = Scene {
             meshes: Vec::<Mesh>::new(),
             shaders: Vec::<NamedShader>::new(),
@@ -414,11 +399,12 @@ impl Scene {
             shader_mat_props: HashMap::<SmolStr, MaterialProperties>::new(),
             default_texture_ids: default_texture_ids,
             shader_name_mapping: Vec::new(),
+            default_shader: (ShaderID::new(0), *source.mat_props()),
         };
 
         scene.add_shader(NamedShader {
-            shader: ShaderSource::load_and_compile(std::path::Path::new("assets/shaders/scene_shader.glsl")),
-            name: "Default shader".to_smolstr(),
+            shader: source.compile(),
+            name: "Default scene shader".to_smolstr(),
         });
 
         scene

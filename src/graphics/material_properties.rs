@@ -14,6 +14,7 @@ pub enum CullMode {
 pub enum DepthTestMode {
     LessEqual = gl::LEQUAL,
     Equal = gl::EQUAL,
+    Always = gl::ALWAYS,
 }
 
 #[derive(Hash, PartialEq, Debug, Clone, Copy)]
@@ -32,8 +33,7 @@ impl MaterialProperties {
         }
     }
 
-    pub const DEFAULT: MaterialProperties =
-        MaterialProperties::new(CullMode::Back, DepthTestMode::LessEqual, true);
+    pub const DEFAULT: MaterialProperties = MaterialProperties::new(CullMode::Back, DepthTestMode::LessEqual, true);
 }
 
 impl DepthTestMode {

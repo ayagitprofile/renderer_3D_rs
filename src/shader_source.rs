@@ -1,4 +1,12 @@
-use std::{ffi::CStr, io::Read};
+#![allow(dead_code)]
+
+use std::{
+    collections::HashMap,
+    ffi::CStr,
+    io::Read,
+    path::PathBuf,
+    sync::{LazyLock, Mutex},
+};
 
 use crate::{
     graphics::{
@@ -14,6 +22,8 @@ pub enum ShaderParsingTarget {
     Vertex,
     Fragment,
 }
+
+static INCLUDE_FILE_CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub struct ShaderSource {
     vertex_source: String,
@@ -100,17 +110,42 @@ impl ShaderSource {
             if line.contains(ShaderSource::SHADER_INCLUDE_DIRECTIVE)
                 && current_parsing_target != ShaderParsingTarget::None
             {
-                let include_string = ShaderSource::load_include(file_path.parent().unwrap(), line);
+                let include_path_str = Self::extract_directive_value(Self::SHADER_INCLUDE_DIRECTIVE, line)
+                    .unwrap()
+                    .trim_matches('"');
 
-                if !include_string.is_none() {
+                let root_path = file_path.parent().unwrap();
+                let include_path = root_path.join(include_path_str);
+
+                let include_string = {
+                    let cache = INCLUDE_FILE_CACHE.lock().unwrap();
+
+                    if let Some(value) = cache.get(&include_path) {
+                        Some(value.clone())
+                    } else {
+                        drop(cache);
+
+                        if let Some(value) = ShaderSource::load_include(&include_path) {
+                            let mut cache = INCLUDE_FILE_CACHE.lock().unwrap();
+                            cache.insert(include_path.clone(), value.clone());
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(include_string) = include_string {
                     match current_parsing_target {
-                        ShaderParsingTarget::None => {}
                         ShaderParsingTarget::Fragment => {
-                            fragment_source.push_str(&include_string.unwrap());
+                            fragment_source.push_str(&include_string);
+                            fragment_source.push('\n');
                         }
                         ShaderParsingTarget::Vertex => {
-                            vertex_source.push_str(&include_string.unwrap());
+                            vertex_source.push_str(&include_string);
+                            vertex_source.push('\n');
                         }
+                        ShaderParsingTarget::None => {}
                     }
                 }
 
@@ -158,11 +193,7 @@ impl ShaderSource {
         }
     }
 
-    fn load_include(root_path: &std::path::Path, line: &str) -> Option<String> {
-        let path_str = Self::extract_directive_value(Self::SHADER_INCLUDE_DIRECTIVE, line)?.trim_matches('"');
-
-        let include_path = root_path.join(path_str);
-
+    fn load_include(include_path: &std::path::Path) -> Option<String> {
         if !include_path.exists() {
             println!(
                 "[ShaderSource] Error: failed to include file, file doesn't exist: {}",
@@ -194,6 +225,7 @@ impl ShaderSource {
             match command.to_lowercase().as_str() {
                 "lequal" | "lessequal" => return DepthTestMode::LessEqual,
                 "equal" => return DepthTestMode::Equal,
+                "always" => return DepthTestMode::Always,
                 _ => {
                     println!("Unknown ZTest command value: {}", command);
                 }

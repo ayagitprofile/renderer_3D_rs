@@ -184,8 +184,6 @@ fn compile_sub_shader(shader_type: u32, source: &CStr) -> u32 {
                 String::from_utf8_lossy(bytes),
                 source.to_string_lossy()
             );
-
-            return 0;
         }
     }
 

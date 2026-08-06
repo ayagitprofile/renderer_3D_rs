@@ -7,11 +7,12 @@ use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
 use crate::{
-    camera, camera_controller, gl, input,
-    scene::{
-        self,
-        scene::{Scene, ShaderMaterialMapping},
-    },
+    camera, camera_controller,
+    fullscreen_quad::FullscreenQuad,
+    gl,
+    graphics::{self, texture::Texture},
+    input,
+    scene::{self, scene::Scene},
     shader_data,
     transform::Transform,
 };
@@ -32,17 +33,43 @@ impl App {
 
         let mut scene = Scene::new();
 
-        scene.load_shaders(
-            &[Path::new("assets/shaders/scene_shader.glsl").to_path_buf()],
-            &[ShaderMaterialMapping::new(
-                "scene_shader",
-                &["ground_mat", "sphere_mat", "monkey_mat, brick_mat, metal_ball_mat"],
-            )],
-        );
-
         scene.load_data_from_file(Path::new("assets/scenes/scene.glb"));
 
         let mut scene_renderer = scene::renderer::Renderer::new();
+
+        let (window_size_x, window_size_y) = (self.sdl_window.size().0 as i32, self.sdl_window.size().1 as i32);
+
+        let mut framebuffer = graphics::frame_buffer::Framebuffer::new();
+
+        let depth_texture = graphics::texture::Texture2D::create_texture(
+            window_size_x,
+            window_size_y,
+            graphics::texture::StorageFormat::Depth24FStencil,
+            graphics::texture::FilteringMode::Bilinear,
+            graphics::texture::WrappingMode::Clamp,
+            false,
+        );
+
+        framebuffer.set_depth_texture_render_target(depth_texture.id(), depth_texture.storage_format());
+
+        let color_texture = graphics::texture::Texture2D::create_texture(
+            window_size_x,
+            window_size_y,
+            graphics::texture::StorageFormat::SRGBA,
+            graphics::texture::FilteringMode::Bilinear,
+            graphics::texture::WrappingMode::Clamp,
+            false,
+        );
+
+        framebuffer.set_color_texture_render_target(color_texture.id(), 0);
+
+        let fs_quad = FullscreenQuad::new(std::path::Path::new("assets/shaders/post_process_shader.glsl"));
+
+        if let Some(loc) = fs_quad.shader.find_uniform_location("fb_color_texture") {
+            fs_quad
+                .shader
+                .map_bindless_texture(loc, color_texture.bindless_handle());
+        }
 
         'main_loop: loop {
             if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
@@ -99,6 +126,14 @@ impl App {
                 break 'main_loop;
             }
 
+            if input.get_key_down(input::Keycode::TAB) {
+                self.sdl_context.mouse().set_relative_mouse_mode(false);
+                camera_controller.ignore_input = true;
+            } else if input.get_key_up(input::Keycode::TAB) {
+                self.sdl_context.mouse().set_relative_mouse_mode(true);
+                camera_controller.ignore_input = false;
+            }
+
             camera_controller.update(&mut self.camera, delta_time, input);
 
             shader_data.set_camera_matrices(&self.camera.view_matrix(), &self.camera.projection_matrix());
@@ -118,11 +153,15 @@ impl App {
                 node.transform = Transform::from_model_matrix(m);
             }
 
-            unsafe {
-                gl::Clear(gl::DEPTH_BUFFER_BIT | gl::COLOR_BUFFER_BIT);
-            }
+            framebuffer.set_active_render_targets(&[0]);
+            framebuffer.clear();
+            framebuffer.bind();
 
             scene_renderer.render(&scene);
+
+            graphics::frame_buffer::bind_default_framebuffer();
+
+            fs_quad.render();
 
             self.imgui_sdl_platform
                 .prepare_frame(&mut self.imgui_context, &self.sdl_window, &self.sdl_event_pump);
@@ -166,8 +205,8 @@ impl App {
 
             attr.set_context_flags().debug().set();
 
-            attr.set_multisample_buffers(1);
-            attr.set_multisample_samples(4);
+            attr.set_multisample_buffers(0);
+            attr.set_multisample_samples(0);
         }
 
         let window = video

@@ -1,12 +1,10 @@
-use std::rc::Rc;
-
 use glam::Mat4;
 
 use super::{data, scene::Scene};
-use crate::gl;
-use crate::graphics::material_properties::{CullMode, DepthTestMode, MaterialProperties};
+use crate::graphics::material_properties::MaterialProperties;
 use crate::graphics::mesh::Mesh;
 use crate::graphics::texture::Texture;
+use crate::{gl, graphics};
 
 pub struct Renderer {
     current_mat_props: MaterialProperties,
@@ -18,9 +16,7 @@ impl Renderer {
             current_mat_props: MaterialProperties::DEFAULT,
         };
 
-        set_depth_test_mode(renderer.current_mat_props.depth_test_mode);
-        set_depth_writing(renderer.current_mat_props.depth_writing_enabled);
-        set_cull_mode(renderer.current_mat_props.cull_mode);
+        graphics::utility::apply_mat_props(&renderer.current_mat_props);
 
         renderer
     }
@@ -71,7 +67,7 @@ impl Renderer {
             );
         }
 
-        // self.set_mat_props(&material.material_properties);
+        graphics::utility::apply_mat_props(&material.material_properties);
 
         unsafe {
             gl::DrawElements(
@@ -80,51 +76,6 @@ impl Renderer {
                 mesh.index_format().to_gl_format(),
                 std::ptr::null(),
             );
-        }
-    }
-
-    fn set_mat_props(&mut self, mat_props: &MaterialProperties) {
-        if *mat_props == self.current_mat_props {
-            return;
-        }
-
-        self.current_mat_props = *mat_props;
-
-        set_depth_test_mode(self.current_mat_props.depth_test_mode);
-        set_depth_writing(self.current_mat_props.depth_writing_enabled);
-        set_cull_mode(self.current_mat_props.cull_mode);
-    }
-}
-
-fn set_depth_writing(value: bool) {
-    unsafe {
-        gl::DepthMask(value as u8);
-    }
-}
-
-fn set_depth_test_mode(value: DepthTestMode) {
-    unsafe {
-        match value {
-            DepthTestMode::LessEqual => gl::DepthFunc(gl::LEQUAL),
-            DepthTestMode::Equal => gl::DepthFunc(gl::EQUAL),
-        }
-    }
-}
-
-fn set_cull_mode(value: CullMode) {
-    unsafe {
-        if value == CullMode::Disabled {
-            gl::Disable(gl::CULL_FACE);
-            return;
-        }
-
-        gl::Enable(gl::CULL_FACE);
-
-        match value {
-            CullMode::Back => gl::CullFace(gl::BACK),
-            CullMode::Front => gl::CullFace(gl::FRONT),
-            CullMode::Both => gl::CullFace(gl::FRONT_AND_BACK),
-            _ => {}
         }
     }
 }

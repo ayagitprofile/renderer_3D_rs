@@ -3,6 +3,7 @@ use crate::shader_source::ShaderSource;
 mod app;
 mod camera;
 mod camera_controller;
+mod fullscreen_quad;
 mod gl;
 mod graphics;
 mod input;

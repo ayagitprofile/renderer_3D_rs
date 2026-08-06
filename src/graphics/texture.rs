@@ -69,6 +69,7 @@ pub struct Texture2D {
     width: i32,
     height: i32,
     channels: i32,
+    storage_format: StorageFormat,
     bindless_handle: u64,
 }
 
@@ -143,6 +144,10 @@ fn get_input_data_format(channels: i32) -> u32 {
 }
 
 impl Texture2D {
+    pub fn storage_format(&self) -> StorageFormat {
+        self.storage_format
+    }
+
     pub fn width(&self) -> i32 {
         self.width
     }
@@ -193,6 +198,7 @@ impl Texture2D {
             width: width,
             height: height,
             channels: channels,
+            storage_format: storage_format,
             bindless_handle: 0,
         };
 
@@ -208,6 +214,45 @@ impl Texture2D {
         texture
     }
 
+    pub fn create_texture(
+        width: i32,
+        height: i32,
+        storage_format: StorageFormat,
+        filtering: FilteringMode,
+        wrapping: WrappingMode,
+        generate_mip_maps: bool,
+    ) -> Texture2D {
+        let mut texture = Texture2D::create_empty_texture(storage_format);
+
+        texture.width = width;
+        texture.height = height;
+
+        unsafe {
+            gl::TextureStorage2D(
+                texture.id,
+                mip_level_count(width as u32, height as u32) as i32,
+                storage_format.to_gl_format(),
+                width,
+                height,
+            );
+        }
+
+        if generate_mip_maps {
+            texture.regenerate_mip_maps();
+        }
+
+        texture.set_wrapping_mode(wrapping);
+        texture.set_filtering_mode(filtering);
+
+        unsafe {
+            texture.bindless_handle = gl::GetTextureHandleARB(texture.id);
+        }
+
+        texture.make_resident();
+
+        texture
+    }
+
     pub fn create_single_color_texture(
         width: i32,
         height: i32,
@@ -215,7 +260,7 @@ impl Texture2D {
         color: &[f32; 4],
         filtering: FilteringMode,
     ) -> Texture2D {
-        let mut texture = Texture2D::create_empty_texture();
+        let mut texture = Texture2D::create_empty_texture(storage_format);
 
         texture.width = width;
         texture.height = height;
@@ -262,7 +307,7 @@ impl Texture2D {
         let path_c_str = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).expect("Incorrect path");
         let str_ptr: *const i8 = path_c_str.as_ptr();
 
-        let mut texture = Texture2D::create_empty_texture();
+        let mut texture = Texture2D::create_empty_texture(storage_format);
 
         unsafe {
             stb_image::stbi_set_flip_vertically_on_load(1);
@@ -315,7 +360,7 @@ impl Texture2D {
         return texture;
     }
 
-    fn create_empty_texture() -> Texture2D {
+    fn create_empty_texture(storage_format: StorageFormat) -> Texture2D {
         let mut id = 0;
 
         unsafe {
@@ -327,6 +372,7 @@ impl Texture2D {
             width: 0,
             height: 0,
             channels: 0,
+            storage_format: storage_format,
             bindless_handle: 0,
         };
 

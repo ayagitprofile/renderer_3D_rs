@@ -39,11 +39,17 @@ pub struct Material {
     pub shader_id: ShaderID,
 }
 
+pub struct AABB {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
 pub struct Node {
     pub transform: Transform,
     children_ids: NodeIDStorage,
     pub mesh_id: MeshID,
     pub material_id: MaterialID,
+    pub bounding_box: AABB,
 }
 
 #[repr(C)]
@@ -53,6 +59,20 @@ pub struct Vertex {
     pub normal: [f32; 3],
     pub tangent_and_handedness: [f32; 4],
     pub uv: [f32; 2],
+}
+
+impl AABB {
+    pub fn new(min: [f32; 3], max: [f32; 3]) -> Self {
+        Self { min: min, max: max }
+    }
+
+    pub fn center(&self) -> [f32; 3] {
+        [
+            (self.min[0] + self.max[0]) * 0.5f32,
+            (self.min[1] + self.max[1]) * 0.5f32,
+            (self.min[2] + self.max[2]) * 0.5f32,
+        ]
+    }
 }
 
 impl Vertex {
@@ -76,12 +96,14 @@ impl Node {
         children_ids: smallvec::SmallVec<[NodeID; 3]>,
         mesh_id: MeshID,
         material_id: MaterialID,
+        bounding_box: AABB,
     ) -> Self {
         Self {
-            transform,
-            children_ids,
-            mesh_id,
-            material_id,
+            transform: transform,
+            children_ids: children_ids,
+            mesh_id: mesh_id,
+            material_id: material_id,
+            bounding_box: bounding_box,
         }
     }
 }
