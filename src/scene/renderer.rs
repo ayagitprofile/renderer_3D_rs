@@ -189,6 +189,12 @@ impl Renderer {
             skybox: Skybox::new(),
         };
 
+        graphics::utility::try_set_bindless_texture(
+            &renderer.skybox.shader,
+            "cubemap_texture",
+            renderer.skybox.cubemap.bindless_handle(),
+        );
+
         renderer
     }
 

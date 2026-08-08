@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use glam::{Mat4, Vec3, vec3};
 
 use crate::transform::Transform;

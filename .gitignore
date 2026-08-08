@@ -18,4 +18,12 @@ rustc-ice-*.txt
 
 .vscode
 
-assets/scenes
+/assets/*
+
+/assets/textures/cubemap
+
+!/assets/shaders/
+!/assets/shaders/**
+
+!/assets/textures/
+!/assets/textures/**

@@ -26,6 +26,10 @@ layout(location = 0) out vec4 out_color;
 
 in vec3 v_sample_direction;
 
+uniform samplerCube cubemap_texture;
+
 void main() {
-    out_color = vec4(normalize(v_sample_direction), 1);
+    vec3 sample_direction = normalize(v_sample_direction);
+    vec3 cubemap_sample = texture(cubemap_texture, sample_direction).rgb;
+    out_color = vec4(cubemap_sample, 1);
 }

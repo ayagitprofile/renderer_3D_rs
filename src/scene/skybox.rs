@@ -1,9 +1,11 @@
 use crate::{
     graphics::{
+        self,
         buffer::Usage,
         material_properties::MaterialProperties,
         mesh::Mesh,
         shader::Shader,
+        texture::Cubemap,
         vertex::{self, Attrib},
     },
     shader_source::ShaderSource,
@@ -13,6 +15,7 @@ pub struct Skybox {
     pub mesh: Mesh,
     pub shader: Shader,
     pub mat_props: MaterialProperties,
+    pub cubemap: Cubemap,
 }
 
 impl Skybox {
@@ -32,6 +35,10 @@ impl Skybox {
             mesh: mesh,
             shader: shader_source.compile(),
             mat_props: *shader_source.mat_props(),
+            cubemap: graphics::utility::load_cubemap_from_sub_textures(
+                std::path::Path::new("assets/cubemap"),
+                graphics::texture::StorageFormat::RGB,
+            ),
         }
     }
 }
