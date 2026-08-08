@@ -6,6 +6,7 @@
 
 uniform sampler2D fb_normal_texture;
 
+out vec3 v_position_ws;
 out vec2 v_uv;
 out mat3 v_TBN;
 
@@ -43,24 +44,333 @@ void main() {
     mat3 TBN = mat3(T, B, N);
     v_TBN = TBN;
     v_uv = a_uv;
+    v_position_ws = position_ws.xyz;
 }
 
 #shader frag
+
+#include "core_uniforms.glsl"
+#include "core_light_data_buffer.glsl"
+#include "core_shader_data_buffer.glsl"
+
+const float PI = 3.14159265359;
+
+// GGX distribution
+float DistributionGGX(vec3 N, vec3 H, float rough)
+{
+    float a = rough * rough;
+    float a2 = a * a;
+
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH * NdotH;
+
+    float denom = NdotH2 * (a2 - 1.0) + 1.0;
+
+    return a2 / max(PI * denom * denom, 0.0001);
+}
+
+// Smith geometry term
+float GeometrySchlickGGX(float NdotV, float rough)
+{
+    float r = rough + 1.0;
+    float k = (r * r) / 8.0;
+
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
+
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float rough)
+{
+    float NdotV = max(dot(N,V),0.0);
+    float NdotL = max(dot(N,L),0.0);
+
+    return GeometrySchlickGGX(NdotV, rough) *
+           GeometrySchlickGGX(NdotL, rough);
+}
+
+float RadicalInverse_VdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+
+    return float(bits) * 2.3283064365386963e-10;
+}
+
+vec2 Hammersley(uint i, uint N)
+{
+    return vec2(float(i) / float(N), RadicalInverse_VdC(i));
+}
+
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness)
+{
+    float a = roughness * roughness;
+
+    float phi = 2.0 * PI * Xi.x;
+
+    float cosTheta =
+        sqrt((1.0 - Xi.y) /
+             (1.0 + (a * a - 1.0) * Xi.y));
+
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+
+    vec3 up =
+        abs(N.z) < 0.999
+        ? vec3(0.0,0.0,1.0)
+        : vec3(1.0,0.0,0.0);
+
+    vec3 tangent   = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+
+    return normalize(
+        tangent   * H.x +
+        bitangent * H.y +
+        N         * H.z);
+}
+
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 +
+        (max(vec3(1.0 - roughness), F0) - F0) *
+        pow(1.0 - cosTheta, 5.0);
+}
+
+vec3 ACESFilm(vec3 x)
+{
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+
+    return clamp(
+        (x * (a * x + b)) /
+        (x * (c * x + d) + e),
+        0.0,
+        1.0
+    );
+}
+
+vec3 EvaluateBRDF(
+    vec3 N,
+    vec3 V,
+    vec3 L,
+    vec3 radiance,
+    vec3 albedo,
+    float metallic,
+    float roughness,
+    vec3 F0)
+{
+    vec3 H = normalize(V + L);
+
+    float NDF = DistributionGGX(N, H, roughness);
+    float G   = GeometrySmith(N, V, L, roughness);
+    vec3  F   = FresnelSchlickRoughness(max(dot(H, V), 0.0), F0, roughness);
+
+    vec3 numerator = NDF * G * F;
+
+    float denominator =
+        4.0 *
+        max(dot(N, V), 0.0) *
+        max(dot(N, L), 0.0) +
+        0.001;
+
+    vec3 specular = numerator / denominator;
+
+    vec3 kS = F;
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+
+    float NdotL = max(dot(N, L), 0.0);
+
+    return
+        (kD * albedo / PI + specular) *
+        radiance *
+        NdotL;
+}
+
+vec3 CalculateDirectionalLight(
+    Core_Light light,
+    vec3 N,
+    vec3 V,
+    vec3 albedo,
+    float metallic,
+    float roughness,
+    vec3 F0)
+{
+    vec3 L = normalize(-light.direction.xyz);
+
+    float intensity = light.color.w;
+
+    vec3 radiance = light.color.rgb * intensity;
+
+    return EvaluateBRDF(
+        N,
+        V,
+        L,
+        radiance,
+        albedo,
+        metallic,
+        roughness,
+        F0
+    );
+}
+
+vec3 CalculatePointLight(
+    Core_Light light,
+    vec3 position_ws,
+    vec3 N,
+    vec3 V,
+    vec3 albedo,
+    float metallic,
+    float roughness,
+    vec3 F0)
+{
+    vec3 toLight = light.position.xyz - position_ws;
+
+    float distanceToLight = length(toLight);
+
+    float light_range = light.attenuation.w;
+
+    if (distanceToLight > light_range)
+        return vec3(0.0);
+
+    vec3 L = toLight / distanceToLight;
+
+    float attenuation =
+        1.0 / max(distanceToLight * distanceToLight, 0.0001);
+
+    attenuation *=
+        pow(clamp(1.0 - distanceToLight / light_range, 0.0, 1.0), 2.0);
+
+    float intensity = light.color.w;
+
+    vec3 radiance = light.color.rgb * intensity * attenuation;
+
+    return EvaluateBRDF(
+        N,
+        V,
+        L,
+        radiance,
+        albedo,
+        metallic,
+        roughness,
+        F0
+    );
+}
+
+vec3 CalculateSpotLight(
+    Core_Light light,
+    vec3 position_ws,
+    vec3 N,
+    vec3 V,
+    vec3 albedo,
+    float metallic,
+    float roughness,
+    vec3 F0)
+{
+    vec3 toLight = light.position.xyz - position_ws;
+
+    float distanceToLight = length(toLight);
+
+    float light_range = light.attenuation.w;
+
+    if (distanceToLight > light_range)
+        return vec3(0.0);
+
+    vec3 L = toLight / distanceToLight;
+
+    float attenuation =
+        1.0 / max(distanceToLight * distanceToLight, 0.0001);
+
+    attenuation *=
+        pow(clamp(1.0 - distanceToLight / light_range, 0.0, 1.0), 2.0);
+
+    float theta = dot(L, normalize(-light.direction.xyz));
+
+    float inner = light.spot_light_data.x;
+    float outer = light.spot_light_data.y;
+
+    float epsilon = inner - outer;
+
+    float spot =
+        clamp(
+            (theta - outer) / epsilon,
+            0.0,
+            1.0
+        );
+
+    float intensity = light.color.w;
+
+    vec3 radiance = light.color.rgb * intensity * attenuation * spot;
+
+    return EvaluateBRDF(
+        N,
+        V,
+        L,
+        radiance,
+        albedo,
+        metallic,
+        roughness,
+        F0
+    );
+}
+
+vec3 CalculateIBL(
+    vec3 N,
+    vec3 V,
+    vec3 albedo,
+    float metallic,
+    float roughness,
+    vec3 F0)
+{
+    vec3 R = reflect(-V, N);
+
+    float maxLod = textureQueryLevels(CORE_CUBEMAP) - 1;
+
+    vec3 env =
+        textureLod(
+            CORE_CUBEMAP,
+            R,
+            roughness * maxLod
+        ).rgb;
+
+    env = pow(env, vec3(2.2));
+
+    vec3 F =
+        FresnelSchlickRoughness(
+            max(dot(N, V), 0.0),
+            F0,
+            roughness
+        );
+
+    vec3 kS = F;
+    vec3 kD = (1.0 - kS) * (1.0 - metallic);
+
+    vec3 ambient =
+        0.03 * albedo * kD +
+        env * kS;
+
+    return ambient;
+}
+
 layout (location = 0) out vec4 out_color;
 
+in vec3 v_position_ws;
 in vec2 v_uv;
 in mat3 v_TBN;
 
-#include "core_uniforms.glsl"
-
 void main() {
-    const vec3 LIGHT_DIR = normalize(-vec3(1.0, 1.0, 1.0));
-
     const vec2 uv = v_uv;
 
     const vec4 mettalic_roughness_sample = texture(CORE_METALLIC_ROUGHNESS_MAP, uv);
     const float metallic = mettalic_roughness_sample.b;
-    const float roughness = mettalic_roughness_sample.g;
+    const float roughness = clamp(mettalic_roughness_sample.g, 0.04, 1.0);
 
     const vec4 albedo_sample = texture(CORE_ALBEDO_MAP, uv);
     const vec3 albedo = albedo_sample.rgb;
@@ -69,9 +379,36 @@ void main() {
 
     vec3 normal_ws = normalize(v_TBN * normal_ts);
 
-    float l_dot_n = dot(-LIGHT_DIR, normal_ws);
+    vec3 N = normal_ws;
+    vec3 V = normalize(CORE_CAMERA_POSITION - v_position_ws);
 
-    vec3 ambient = albedo * 1.5;
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-    out_color = vec4(l_dot_n * albedo + ambient, 1);
+    vec3 direct_light = vec3(0);
+
+    for (uint i = 0; i < CORE_LIGHT_COUNT; i++) {
+        Core_Light light = CORE_LIGHT_ARRAY[i];
+
+        uint light_type = uint(light.position.w);
+
+        switch (light_type) {
+            case CORE_LIGHT_TYPE_DIRECTIONAL: {
+                direct_light += CalculateDirectionalLight(light, N, V, albedo, metallic, roughness, F0);
+            } break;
+
+            default: break;
+        };
+    }
+
+    vec3 indirect_light = CalculateIBL(N, V, albedo, metallic, roughness, F0);
+
+    vec3 color = direct_light + indirect_light;
+
+    // HDR tonemap
+    color = ACESFilm(color);
+
+    // gamma
+    color = pow(color, vec3(1.0/2.2));
+
+    out_color = vec4(color, 1);
 }

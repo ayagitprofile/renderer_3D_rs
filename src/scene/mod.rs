@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
-mod buffers;
+pub mod buffers;
 pub mod data;
 pub mod light;
+pub mod light_data_buffer;
 pub mod renderer;
 pub mod resource_id;
 pub mod scene;

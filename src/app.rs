@@ -3,6 +3,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+use glam::{Vec3, vec3};
 use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
@@ -12,7 +13,7 @@ use crate::{
     gl,
     graphics::{self, texture::Texture},
     input,
-    scene::{self, scene::Scene},
+    scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene::Scene},
     shader_data,
     transform::Transform,
 };
@@ -23,7 +24,16 @@ impl App {
     pub fn run(&mut self) {
         let mut shader_data = shader_data::GlobalShaderData::new();
 
-        shader_data.set_storage_buffer_binding(0);
+        let dir = vec3(1f32, -1f32, 1f32);
+
+        let mut light_data = LightDataBuffer::new(&[LightData::directional_light(
+            (-glam::Vec3::ONE.normalize()).to_array(),
+            Vec3::ONE.to_array(),
+            3.5f32,
+        )
+        .to_gpu_data()]);
+
+        // light_data.clear_cpu_side_buffer();
 
         self.camera
             .transform

@@ -24,7 +24,7 @@ pub struct GlobalShaderData {
 }
 
 impl GlobalShaderData {
-    pub fn set_storage_buffer_binding(&self, index: u32) {
+    fn set_storage_buffer_binding(&self, index: u32) {
         self.global_data_buffer
             .set_binding(graphics::buffer::BindingTarget::ShaderStorageBuffer, index);
     }
@@ -53,9 +53,13 @@ impl GlobalShaderData {
 
         buffer.allocate(data.as_slice(), graphics::buffer::Usage::Dynamic);
 
-        Self {
+        let data = GlobalShaderData {
             global_data_buffer: buffer,
             gpu_side_data: data,
-        }
+        };
+
+        data.set_storage_buffer_binding(crate::scene::buffers::SHADER_SHARED_DATA_BUFFER_BINDING_INDEX);
+
+        data
     }
 }

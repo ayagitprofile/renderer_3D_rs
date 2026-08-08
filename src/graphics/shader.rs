@@ -17,6 +17,14 @@ pub enum ComputeMemoryBarrier {
     All = gl::ALL_BARRIER_BITS,
 }
 
+fn add_line_indices(s: &str) -> String {
+    s.lines()
+        .enumerate()
+        .map(|(i, line)| format!("{i}: {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub struct Shader {
     id: u32,
     uniform_data_storage: UniformDataStorage,
@@ -217,7 +225,7 @@ fn compile_sub_shader(shader_type: u32, source: &CStr) -> u32 {
             panic!(
                 "Shader compilation failed: {}\nSource dump: \n{}",
                 String::from_utf8_lossy(bytes),
-                source.to_string_lossy()
+                add_line_indices(source.to_str().unwrap())
             );
         }
     }
