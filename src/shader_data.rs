@@ -3,7 +3,7 @@ use glam::{Mat4, Vec4};
 use crate::graphics;
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy)]
 struct GPUSideData {
     camera_vp_matrix: Mat4,
     camera_view_matrix: Mat4,
@@ -30,8 +30,7 @@ impl GlobalShaderData {
     }
 
     pub fn upload_data(&self) {
-        self.global_data_buffer
-            .upload_data(self.gpu_side_data.as_slice());
+        self.global_data_buffer.upload_data(self.gpu_side_data.as_slice());
     }
 
     pub fn set_camera_matrices(&mut self, view_matrix: &Mat4, projection_matrix: &Mat4) {

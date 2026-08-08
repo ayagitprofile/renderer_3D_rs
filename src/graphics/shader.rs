@@ -9,15 +9,50 @@ struct UniformData {
 
 type UniformDataStorage = smallvec::SmallVec<[UniformData; 4]>;
 
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub enum ComputeMemoryBarrier {
+    TextureFetch = gl::TEXTURE_FETCH_BARRIER_BIT,
+    SSBORead = gl::SHADER_STORAGE_BARRIER_BIT,
+    All = gl::ALL_BARRIER_BITS,
+}
+
 pub struct Shader {
     id: u32,
     uniform_data_storage: UniformDataStorage,
+}
+
+pub struct ComputeShader {
+    shader: Shader,
 }
 
 impl Drop for Shader {
     fn drop(&mut self) {
         unsafe {
             gl::DeleteProgram(self.id);
+        }
+    }
+}
+
+impl ComputeShader {
+    pub fn compile_compute_from_c_string(source: &CStr) -> Self {
+        let id = compile_compute_shader(source);
+        let shader = Shader {
+            id: id,
+            uniform_data_storage: Shader::load_uniform_data(id),
+        };
+
+        Self { shader: shader }
+    }
+
+    pub fn dispatch(&self, work_groups_x: u32, work_groups_y: u32, barrier: Option<ComputeMemoryBarrier>) {
+        self.shader.bind();
+        unsafe {
+            gl::DispatchCompute(work_groups_x, work_groups_y, 1);
+
+            if let Some(barrier_value) = barrier {
+                gl::MemoryBarrier(barrier_value as u32);
+            }
         }
     }
 }
@@ -190,6 +225,47 @@ fn compile_sub_shader(shader_type: u32, source: &CStr) -> u32 {
     return shader;
 }
 
+fn compile_compute_shader(source: &CStr) -> u32 {
+    use std::ffi::c_char;
+
+    let compute_sub = compile_sub_shader(gl::COMPUTE_SHADER, source);
+
+    if compute_sub == 0 {
+        return 0;
+    }
+
+    let shader;
+
+    unsafe {
+        shader = gl::CreateProgram();
+
+        gl::AttachShader(shader, compute_sub);
+
+        gl::LinkProgram(shader);
+
+        let mut success = 0;
+        gl::GetProgramiv(shader, gl::LINK_STATUS, &mut success);
+
+        if success == gl::FALSE as i32 {
+            let mut buffer: [c_char; 2048] = [0; 2048];
+            let mut string_len: i32 = 0;
+
+            gl::GetShaderInfoLog(shader, buffer.len() as i32, &mut string_len, buffer.as_mut_ptr());
+            gl::DeleteProgram(shader);
+
+            let bytes = std::slice::from_raw_parts(buffer.as_ptr() as *const u8, string_len as usize);
+
+            println!("Compute shader linking failed: {}", String::from_utf8_lossy(bytes));
+
+            return 0;
+        }
+
+        gl::DeleteShader(compute_sub);
+    }
+
+    shader
+}
+
 fn compile_shader(vertex_source: &CStr, fragment_source: &CStr) -> u32 {
     use std::ffi::c_char;
 
@@ -231,5 +307,5 @@ fn compile_shader(vertex_source: &CStr, fragment_source: &CStr) -> u32 {
         gl::DeleteShader(fragment_sub);
     }
 
-    return shader;
+    shader
 }

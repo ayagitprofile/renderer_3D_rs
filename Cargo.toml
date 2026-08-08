@@ -15,8 +15,7 @@ smol_str = "0.3.6"
 smallvec = "1.15.2"
 
 stb_image = "0.3.0"
-glam = { version = "0.30", features = ["bytemuck"] }
-bytemuck = { version = "1.25.2", features = ["derive"] }
+glam = { version = "0.30"}
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
 
 [build-dependencies]

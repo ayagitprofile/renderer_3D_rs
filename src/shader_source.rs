@@ -11,7 +11,7 @@ use std::{
 use crate::{
     graphics::{
         material_properties::{CullMode, DepthTestMode, MaterialProperties},
-        shader::Shader,
+        shader::{ComputeShader, Shader},
     },
     timer::ScopedTimer,
 };
@@ -21,6 +21,7 @@ pub enum ShaderParsingTarget {
     None,
     Vertex,
     Fragment,
+    Compute,
 }
 
 static INCLUDE_FILE_CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -28,6 +29,7 @@ static INCLUDE_FILE_CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> = LazyLock:
 pub struct ShaderSource {
     vertex_source: String,
     fragment_source: String,
+    compute_source: String,
     material_properties: MaterialProperties,
     name: String,
 }
@@ -38,6 +40,12 @@ impl ShaderSource {
         let frag_cstr = CStr::from_bytes_with_nul(self.fragment_source.as_bytes()).unwrap();
 
         Shader::compile_from_c_strings(vert_cstr, frag_cstr)
+    }
+
+    pub fn compile_compute(&self) -> ComputeShader {
+        let compute_cstr = CStr::from_bytes_with_nul(self.compute_source.as_bytes()).unwrap();
+
+        ComputeShader::compile_compute_from_c_string(compute_cstr)
     }
 
     pub fn load_and_compile(file_path: &std::path::Path) -> Shader {
@@ -74,6 +82,7 @@ impl ShaderSource {
 
         let mut vertex_source = String::with_capacity(file_size / 4);
         let mut fragment_source = String::with_capacity(file_size / 2);
+        let mut compute_source = String::new();
 
         vertex_source.push_str(ShaderSource::SHADER_VERSION_DIRECTIVE_KV);
         vertex_source.push_str(ShaderSource::VERTEX_SHADER_TYPE_MACRO);
@@ -82,6 +91,10 @@ impl ShaderSource {
         fragment_source.push_str(ShaderSource::SHADER_VERSION_DIRECTIVE_KV);
         fragment_source.push_str(ShaderSource::FRAGMENT_SHADER_TYPE_MACRO);
         fragment_source.push_str(ShaderSource::ENABLE_BINDLESS_TEXTURES_DIRECTIVE);
+
+        compute_source.push_str(ShaderSource::SHADER_VERSION_DIRECTIVE_KV);
+        compute_source.push_str(ShaderSource::COMPUTE_SHADER_TYPE_MACRO);
+        compute_source.push_str(ShaderSource::ENABLE_BINDLESS_TEXTURES_DIRECTIVE);
 
         let name = file_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
 
@@ -145,6 +158,10 @@ impl ShaderSource {
                             vertex_source.push_str(&include_string);
                             vertex_source.push('\n');
                         }
+                        ShaderParsingTarget::Compute => {
+                            compute_source.push_str(&include_string);
+                            compute_source.push('\n');
+                        }
                         ShaderParsingTarget::None => {}
                     }
                 }
@@ -179,15 +196,21 @@ impl ShaderSource {
                     vertex_source.push_str(line);
                     vertex_source.push('\n');
                 }
+                ShaderParsingTarget::Compute => {
+                    compute_source.push_str(line);
+                    compute_source.push('\n');
+                }
             }
         }
 
         vertex_source.push('\0');
         fragment_source.push('\0');
+        compute_source.push('\0');
 
         ShaderSource {
             vertex_source: vertex_source,
             fragment_source: fragment_source,
+            compute_source: compute_source,
             name: name,
             material_properties: mat_props,
         }
@@ -260,6 +283,7 @@ impl ShaderSource {
         {
             "vertex" | "vert" => ShaderParsingTarget::Vertex,
             "fragment" | "frag" | "pixel" => ShaderParsingTarget::Fragment,
+            "compute" => ShaderParsingTarget::Compute,
             _ => {
                 println!("[ShaderSource] Warning: ignored unknown shader type: {}", line);
                 ShaderParsingTarget::None
@@ -280,6 +304,7 @@ impl ShaderSource {
 
     const VERTEX_SHADER_TYPE_MACRO: &str = "#define VERTEX_SHADER\n";
     const FRAGMENT_SHADER_TYPE_MACRO: &str = "#define FRAGMENT_SHADER\n";
+    const COMPUTE_SHADER_TYPE_MACRO: &str = "#define COMPUTE_SHADER\n";
 
     const ENABLE_BINDLESS_TEXTURES_DIRECTIVE: &str = "#extension GL_ARB_bindless_texture : require\n";
 

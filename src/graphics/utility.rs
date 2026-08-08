@@ -1,5 +1,8 @@
 use super::material_properties as mat_props;
-use crate::gl;
+use crate::{
+    gl,
+    graphics::{shader::Shader, texture::Texture2D},
+};
 
 pub fn apply_mat_props(mat_props: &mat_props::MaterialProperties) {
     set_depth_test_mode(mat_props.depth_test_mode);
@@ -10,6 +13,13 @@ pub fn apply_mat_props(mat_props: &mat_props::MaterialProperties) {
 pub fn set_depth_writing(value: bool) {
     unsafe {
         gl::DepthMask(value as u8);
+    }
+}
+
+/// Use for debugging
+pub fn try_set_bindless_texture(shader: &Shader, texture_name: &str, handle: u64) {
+    if let Some(location) = shader.find_uniform_location(texture_name) {
+        shader.map_bindless_texture(location, handle);
     }
 }
 

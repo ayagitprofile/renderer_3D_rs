@@ -45,12 +45,10 @@ impl App {
             window_size_x,
             window_size_y,
             graphics::texture::StorageFormat::Depth24FStencil,
-            graphics::texture::FilteringMode::Bilinear,
+            graphics::texture::FilteringMode::Nearest,
             graphics::texture::WrappingMode::Clamp,
             false,
         );
-
-        framebuffer.set_depth_texture_render_target(depth_texture.id(), depth_texture.storage_format());
 
         let color_texture = graphics::texture::Texture2D::create_texture(
             window_size_x,
@@ -61,27 +59,56 @@ impl App {
             false,
         );
 
-        framebuffer.set_color_texture_render_target(color_texture.id(), 0);
+        let normal_texture = graphics::texture::Texture2D::create_texture(
+            window_size_x,
+            window_size_y,
+            graphics::texture::StorageFormat::RG16F,
+            graphics::texture::FilteringMode::Nearest,
+            graphics::texture::WrappingMode::Clamp,
+            false,
+        );
+
+        let ambient_occlusion_texture = graphics::texture::Texture2D::create_texture(
+            window_size_x,
+            window_size_y,
+            graphics::texture::StorageFormat::R,
+            graphics::texture::FilteringMode::Nearest,
+            graphics::texture::WrappingMode::Clamp,
+            false,
+        );
+
+        const COLOR_TEXTURE_TARGET: usize = 0;
+        const NORMAL_TEXTURE_TARGET: usize = 1;
+
+        framebuffer.set_depth_texture_render_target(depth_texture.id(), depth_texture.storage_format());
+        framebuffer.set_color_texture_render_target(color_texture.id(), COLOR_TEXTURE_TARGET);
+        framebuffer.set_color_texture_render_target(normal_texture.id(), NORMAL_TEXTURE_TARGET);
 
         let fs_quad = FullscreenQuad::new(std::path::Path::new("assets/shaders/post_process_shader.glsl"));
 
-        if let Some(loc) = fs_quad
-            .shader
-            .find_uniform_location(scene::textures::FRAMEBUFFER_COLOR_TEXTURE)
-        {
-            fs_quad
-                .shader
-                .map_bindless_texture(loc, color_texture.bindless_handle());
-        }
+        graphics::utility::try_set_bindless_texture(
+            &fs_quad.shader,
+            scene::textures::FRAMEBUFFER_COLOR_TEXTURE,
+            color_texture.bindless_handle(),
+        );
 
-        if let Some(loc) = fs_quad
-            .shader
-            .find_uniform_location(scene::textures::FRAMEBUFFER_DEPTH_TEXTURE)
-        {
-            fs_quad
-                .shader
-                .map_bindless_texture(loc, depth_texture.bindless_handle());
-        }
+        graphics::utility::try_set_bindless_texture(
+            &fs_quad.shader,
+            scene::textures::FRAMEBUFFER_DEPTH_TEXTURE,
+            depth_texture.bindless_handle(),
+        );
+
+        graphics::utility::try_set_bindless_texture(
+            &fs_quad.shader,
+            scene::textures::FRAMEBUFFER_NORMAL_TEXTURE,
+            normal_texture.bindless_handle(),
+        );
+
+        graphics::utility::try_set_bindless_texture(
+            &fs_quad.shader,
+            scene::textures::AO_TEXTURE,
+            ambient_occlusion_texture.bindless_handle(),
+        );
 
         'main_loop: loop {
             if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
@@ -146,6 +173,25 @@ impl App {
                 camera_controller.ignore_input = false;
             }
 
+            for i in 0..scene.root_nodes().len() {
+                let node = scene.get_node_mut(scene.root_nodes()[i]);
+
+                if node.transform.position().y < 0f32 {
+                    continue;
+                }
+
+                let time = std::time::Instant::now()
+                    .duration_since(self.time_on_app_startup)
+                    .as_secs_f32();
+
+                let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
+
+                let rotation = glam::Quat::from_axis_angle(Transform::UP, time);
+
+                node.transform =
+                    Transform::from_model_matrix(glam::Mat4::from_scale_rotation_translation(s, rotation, t));
+            }
+
             camera_controller.update(&mut self.camera, delta_time, input);
 
             shader_data.set_camera_matrices(&self.camera.view_matrix(), &self.camera.projection_matrix());
@@ -153,12 +199,13 @@ impl App {
 
             let rendering_stats = scene_renderer.prepare_rendering_data(&scene, &self.camera);
 
-            framebuffer.set_active_render_targets(&[0]);
-            framebuffer.clear();
+            framebuffer.clear_all_attachments();
             framebuffer.bind();
 
+            framebuffer.set_active_render_target(NORMAL_TEXTURE_TARGET);
             scene_renderer.render_depth_prepass(&scene);
 
+            framebuffer.set_active_render_target(COLOR_TEXTURE_TARGET);
             scene_renderer.render(&scene);
 
             graphics::framebuffer::bind_default_framebuffer();

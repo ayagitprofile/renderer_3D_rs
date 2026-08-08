@@ -14,8 +14,10 @@ pub struct Framebuffer {
     depth_target: Option<(RenderTarget, u32)>,
 }
 
+const CLEAR_COLOR: [f32; 4] = [0f32; 4];
+
 impl Framebuffer {
-    pub const MAX_RENDER_TARGETS: usize = 16;
+    pub const MAX_RENDER_TARGETS: usize = 6;
 
     pub fn set_depth_texture_render_target(&mut self, texture_id: u32, storage_format: StorageFormat) {
         let (attachment, clear_target) = match storage_format {
@@ -50,6 +52,23 @@ impl Framebuffer {
         }
     }
 
+    pub fn disable_render_targets(&self) {
+        unsafe {
+            gl::NamedFramebufferDrawBuffer(self.id, 0);
+        }
+    }
+
+    pub fn set_active_render_target(&self, render_target_index: usize) {
+        assert!(self.is_complete());
+
+        assert!(self.color_target_slots[render_target_index].is_some());
+
+        unsafe {
+            gl::NamedFramebufferDrawBuffer(self.id, gl::COLOR_ATTACHMENT0 + render_target_index as u32);
+            // gl::ClearNamedFramebufferfv(self.id, gl::COLOR, render_target_index as i32, CLEAR_COLOR.as_ptr());
+        }
+    }
+
     pub fn set_active_render_targets(&self, render_target_indexes: &[usize]) {
         assert!(self.is_complete());
 
@@ -79,11 +98,10 @@ impl Framebuffer {
     pub fn bind(&self) {
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, self.id);
-            // gl::Viewport(0, 0, window_size_x, window_size_y);
         }
     }
 
-    pub fn clear(&self) {
+    pub fn clear_all_attachments(&self) {
         assert!(self.is_complete());
         const COLOR: [f32; 4] = [0f32; 4];
 
@@ -94,11 +112,21 @@ impl Framebuffer {
             gl::ClearNamedFramebufferfi(self.id, clear_target, 0, 1.0f32, 0);
         }
 
-        for attachment_index in 0..self.color_target_slots.len() {
-            if let Some(_) = self.color_target_slots[attachment_index] {
-                unsafe {
-                    gl::ClearNamedFramebufferfv(self.id, gl::COLOR, attachment_index as i32, COLOR.as_ptr());
-                }
+        let mut render_attachments = [0u32; Framebuffer::MAX_RENDER_TARGETS];
+        let mut count = 0i32;
+
+        for i in 0..self.color_target_slots.len() {
+            if self.color_target_slots[i].is_some() {
+                render_attachments[count as usize] = gl::COLOR_ATTACHMENT0 + i as u32;
+                count += 1;
+            }
+        }
+
+        unsafe {
+            gl::NamedFramebufferDrawBuffers(self.id, count, render_attachments.as_ptr());
+
+            for i in 0..count {
+                gl::ClearNamedFramebufferfv(self.id, gl::COLOR, i, COLOR.as_ptr());
             }
         }
     }

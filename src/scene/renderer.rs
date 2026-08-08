@@ -6,13 +6,17 @@ use crate::graphics::material_properties::MaterialProperties;
 use crate::graphics::mesh::Mesh;
 use crate::graphics::shader::Shader;
 use crate::graphics::texture::Texture;
+use crate::scene::skybox::Skybox;
 use crate::shader_source::ShaderSource;
 use crate::{gl, graphics};
+
+const SHADER_MODEL_MATRIX_UNIFORM_NAME: &str = "u_model_matrix";
 
 pub struct Renderer {
     current_mat_props: MaterialProperties,
     draw_call_data: Vec<DrawCallData>,
     depth_prepass_shader: (Shader, MaterialProperties),
+    skybox: Skybox,
 }
 
 struct DrawCallData {
@@ -182,6 +186,7 @@ impl Renderer {
             current_mat_props: MaterialProperties::DEFAULT,
             draw_call_data: Vec::with_capacity(128),
             depth_prepass_shader: (depth_prepass_source.compile(), *depth_prepass_source.mat_props()),
+            skybox: Skybox::new(),
         };
 
         renderer
@@ -218,6 +223,23 @@ impl Renderer {
         for data in self.draw_call_data.iter() {
             self.render_node(scene, data.node_id, &data.object_to_world);
         }
+
+        self.render_mesh(&self.skybox.mesh, &self.skybox.shader, &self.skybox.mat_props);
+    }
+
+    fn render_mesh(&self, mesh: &Mesh, shader: &Shader, mat_props: &MaterialProperties) {
+        graphics::utility::apply_mat_props(mat_props);
+        shader.bind();
+        mesh.vao().bind();
+
+        unsafe {
+            gl::DrawElements(
+                gl::TRIANGLES,
+                mesh.index_count(),
+                mesh.index_format().to_gl_format(),
+                std::ptr::null(),
+            );
+        }
     }
 
     fn render_node(&self, scene: &Scene, child_id: data::NodeID, object_to_world: &Mat4) {
@@ -227,18 +249,13 @@ impl Renderer {
 
         let child_material = scene.get_material(child.material_id);
 
-        self.render_mesh(scene, child_mesh, child_material, object_to_world);
+        self.render_scene_mesh(scene, child_mesh, child_material, object_to_world);
     }
 
-    fn render_mesh(&self, scene: &Scene, mesh: &Mesh, material: &data::Material, model_matrix: &glam::Mat4) {
+    fn render_scene_mesh(&self, scene: &Scene, mesh: &Mesh, material: &data::Material, model_matrix: &glam::Mat4) {
         mesh.vao().bind();
 
         let shader = scene.get_shader(material.shader_id);
-        shader.bind();
-
-        if let Some(location) = shader.find_uniform_location("u_model_matrix") {
-            shader.set_uniform_mat4(location, &model_matrix.to_cols_array());
-        }
 
         for texture_id in material.texture_ids.iter() {
             let texture = scene.get_texture(*texture_id);
@@ -250,15 +267,14 @@ impl Renderer {
             );
         }
 
-        graphics::utility::apply_mat_props(&material.material_properties);
+        Renderer::upload_model_matrix(shader, model_matrix);
 
-        unsafe {
-            gl::DrawElements(
-                gl::TRIANGLES,
-                mesh.index_count(),
-                mesh.index_format().to_gl_format(),
-                std::ptr::null(),
-            );
+        self.render_mesh(mesh, shader, &material.material_properties);
+    }
+
+    fn upload_model_matrix(shader: &Shader, model_matrix: &glam::Mat4) {
+        if let Some(location) = shader.find_uniform_location(SHADER_MODEL_MATRIX_UNIFORM_NAME) {
+            shader.set_uniform_mat4(location, &model_matrix.to_cols_array());
         }
     }
 }

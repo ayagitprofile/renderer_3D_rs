@@ -7,6 +7,8 @@ pub const FRAMEBUFFER_COLOR_TEXTURE: &str = "fb_color_texture";
 pub const FRAMEBUFFER_DEPTH_TEXTURE: &str = "fb_depth_texture";
 pub const FRAMEBUFFER_NORMAL_TEXTURE: &str = "fb_normal_texture";
 
+pub const AO_TEXTURE: &str = "ao_texture";
+
 pub const TEXTURE_NAME_ARRAY: [&str; 3] = [
     ALBEDO_TEXTURE_NAME,
     NORMAL_TEXTURE_NAME,
