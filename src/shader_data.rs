@@ -1,6 +1,6 @@
-use glam::{Mat4, Vec4};
+use glam::{Mat4, Vec4, vec4};
 
-use crate::graphics;
+use crate::{graphics, transform::Transform};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -33,11 +33,23 @@ impl GlobalShaderData {
         self.global_data_buffer.upload_data(self.gpu_side_data.as_slice());
     }
 
-    pub fn set_camera_matrices(&mut self, view_matrix: &Mat4, projection_matrix: &Mat4) {
+    fn set_camera_matrices(&mut self, view_matrix: &Mat4, projection_matrix: &Mat4) {
         self.gpu_side_data.camera_view_matrix = *view_matrix;
         self.gpu_side_data.camera_projection_matrix = *projection_matrix;
         self.gpu_side_data.camera_vp_matrix =
             self.gpu_side_data.camera_projection_matrix * self.gpu_side_data.camera_view_matrix;
+    }
+
+    pub fn set_camera_data(&mut self, view_matrix: &Mat4, projection_matrix: &Mat4, camera_transform: &Transform) {
+        self.set_camera_matrices(view_matrix, projection_matrix);
+
+        let position = camera_transform.position();
+
+        self.gpu_side_data.camera_position = vec4(position.x, position.y, position.z, 0f32);
+
+        let forward = camera_transform.forward();
+
+        self.gpu_side_data.camera_forward = vec4(forward.x, forward.y, forward.z, 0f32);
     }
 
     pub fn new() -> Self {

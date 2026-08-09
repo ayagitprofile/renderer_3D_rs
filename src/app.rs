@@ -3,7 +3,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use glam::{Vec3, vec3};
+use glam::Vec3;
 use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
@@ -15,7 +15,6 @@ use crate::{
     input,
     scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene::Scene},
     shader_data,
-    transform::Transform,
 };
 
 static OPENGL_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -24,16 +23,13 @@ impl App {
     pub fn run(&mut self) {
         let mut shader_data = shader_data::GlobalShaderData::new();
 
-        let dir = vec3(1f32, -1f32, 1f32);
-
-        let mut light_data = LightDataBuffer::new(&[LightData::directional_light(
-            (-glam::Vec3::ONE.normalize()).to_array(),
-            Vec3::ONE.to_array(),
-            3.5f32,
-        )
-        .to_gpu_data()]);
-
-        // light_data.clear_cpu_side_buffer();
+        let _light_data = LightDataBuffer::new(&[
+            LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 3.5f32)
+                .to_gpu_data(),
+            LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 2f32, 5f32).to_gpu_data(),
+            LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 2f32, 5f32).to_gpu_data(),
+            LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 2f32, 5f32).to_gpu_data(),
+        ]);
 
         self.camera
             .transform
@@ -183,28 +179,33 @@ impl App {
                 camera_controller.ignore_input = false;
             }
 
-            for i in 0..scene.root_nodes().len() {
-                let node = scene.get_node_mut(scene.root_nodes()[i]);
+            // for i in 0..scene.root_nodes().len() {
+            //     let node = scene.get_node_mut(scene.root_nodes()[i]);
 
-                if node.transform.position().y < 0f32 {
-                    continue;
-                }
+            //     if node.transform.position().y < 0f32 {
+            //         continue;
+            //     }
 
-                let time = std::time::Instant::now()
-                    .duration_since(self.time_on_app_startup)
-                    .as_secs_f32();
+            //     let time = std::time::Instant::now()
+            //         .duration_since(self.time_on_app_startup)
+            //         .as_secs_f32();
 
-                let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
+            //     let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
 
-                let rotation = glam::Quat::from_axis_angle(Transform::UP, time);
+            //     let rotation = glam::Quat::from_axis_angle(Transform::UP, time);
 
-                node.transform =
-                    Transform::from_model_matrix(glam::Mat4::from_scale_rotation_translation(s, rotation, t));
-            }
+            //     node.transform =
+            //         Transform::from_model_matrix(glam::Mat4::from_scale_rotation_translation(s, rotation, t));
+            // }
 
             camera_controller.update(&mut self.camera, delta_time, input);
 
-            shader_data.set_camera_matrices(&self.camera.view_matrix(), &self.camera.projection_matrix());
+            shader_data.set_camera_data(
+                &self.camera.view_matrix(),
+                &self.camera.projection_matrix(),
+                &self.camera.transform,
+            );
+
             shader_data.upload_data();
 
             let rendering_stats = scene_renderer.prepare_rendering_data(&scene, &self.camera);

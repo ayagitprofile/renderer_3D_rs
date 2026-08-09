@@ -273,6 +273,8 @@ impl Renderer {
             );
         }
 
+        graphics::utility::try_set_bindless_texture(&shader, "cubemap_texture", self.skybox.cubemap.bindless_handle());
+
         Renderer::upload_model_matrix(shader, model_matrix);
 
         self.render_mesh(mesh, shader, &material.material_properties);

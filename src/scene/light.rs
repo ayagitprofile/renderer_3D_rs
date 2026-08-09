@@ -73,7 +73,23 @@ impl LightData {
         }
     }
 
-    pub fn directional_light(direction: [f32; 3], color: [f32; 3], color_intensity: f32) -> Self {
+    pub fn new_point_light(position: [f32; 3], color: [f32; 3], color_intensity: f32, attenuation_range: f32) -> Self {
+        Self {
+            type_of_light: LightType::Point,
+            position: position,
+            color: color,
+            color_intensity: color_intensity,
+            constant_attenuation: 0f32,
+            linear_attenuation: 0f32,
+            quadratic_attenuation: 0f32,
+            attenuation_range: attenuation_range,
+            direction: [0f32; 3],
+            spot_light_inner_cone_cos: 0f32,
+            spot_light_outer_cone_cos: 0f32,
+        }
+    }
+
+    pub fn new_directional_light(direction: [f32; 3], color: [f32; 3], color_intensity: f32) -> Self {
         Self {
             type_of_light: LightType::Directional,
             position: [0f32; 3],

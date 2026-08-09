@@ -55,8 +55,7 @@ void main() {
 
 const float PI = 3.14159265359;
 
-// GGX distribution
-float DistributionGGX(vec3 N, vec3 H, float rough)
+float distribution_GGX(vec3 N, vec3 H, float rough)
 {
     float a = rough * rough;
     float a2 = a * a;
@@ -69,8 +68,7 @@ float DistributionGGX(vec3 N, vec3 H, float rough)
     return a2 / max(PI * denom * denom, 0.0001);
 }
 
-// Smith geometry term
-float GeometrySchlickGGX(float NdotV, float rough)
+float geometry_schlick_GGX(float NdotV, float rough)
 {
     float r = rough + 1.0;
     float k = (r * r) / 8.0;
@@ -78,16 +76,16 @@ float GeometrySchlickGGX(float NdotV, float rough)
     return NdotV / (NdotV * (1.0 - k) + k);
 }
 
-float GeometrySmith(vec3 N, vec3 V, vec3 L, float rough)
+float geometry_smith(vec3 N, vec3 V, vec3 L, float rough)
 {
     float NdotV = max(dot(N,V),0.0);
     float NdotL = max(dot(N,L),0.0);
 
-    return GeometrySchlickGGX(NdotV, rough) *
-           GeometrySchlickGGX(NdotL, rough);
+    return geometry_schlick_GGX(NdotV, rough) *
+           geometry_schlick_GGX(NdotL, rough);
 }
 
-float RadicalInverse_VdC(uint bits)
+float radical_inverse_VdC(uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
@@ -98,12 +96,12 @@ float RadicalInverse_VdC(uint bits)
     return float(bits) * 2.3283064365386963e-10;
 }
 
-vec2 Hammersley(uint i, uint N)
+vec2 hammersley(uint i, uint N)
 {
-    return vec2(float(i) / float(N), RadicalInverse_VdC(i));
+    return vec2(float(i) / float(N), radical_inverse_VdC(i));
 }
 
-vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness)
+vec3 importance_sample_GGX(vec2 Xi, vec3 N, float roughness)
 {
     float a = roughness * roughness;
 
@@ -134,14 +132,14 @@ vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness)
         N         * H.z);
 }
 
-vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness)
 {
     return F0 +
         (max(vec3(1.0 - roughness), F0) - F0) *
         pow(1.0 - cosTheta, 5.0);
 }
 
-vec3 ACESFilm(vec3 x)
+vec3 ACES_film(vec3 x)
 {
     const float a = 2.51;
     const float b = 0.03;
@@ -157,7 +155,7 @@ vec3 ACESFilm(vec3 x)
     );
 }
 
-vec3 EvaluateBRDF(
+vec3 evaluate_BRDF(
     vec3 N,
     vec3 V,
     vec3 L,
@@ -169,9 +167,9 @@ vec3 EvaluateBRDF(
 {
     vec3 H = normalize(V + L);
 
-    float NDF = DistributionGGX(N, H, roughness);
-    float G   = GeometrySmith(N, V, L, roughness);
-    vec3  F   = FresnelSchlickRoughness(max(dot(H, V), 0.0), F0, roughness);
+    float NDF = distribution_GGX(N, H, roughness);
+    float G   = geometry_smith(N, V, L, roughness);
+    vec3  F   = fresnel_schlick_roughness(max(dot(H, V), 0.0), F0, roughness);
 
     vec3 numerator = NDF * G * F;
 
@@ -194,7 +192,7 @@ vec3 EvaluateBRDF(
         NdotL;
 }
 
-vec3 CalculateDirectionalLight(
+vec3 calculate_directional_light(
     Core_Light light,
     vec3 N,
     vec3 V,
@@ -209,7 +207,7 @@ vec3 CalculateDirectionalLight(
 
     vec3 radiance = light.color.rgb * intensity;
 
-    return EvaluateBRDF(
+    return evaluate_BRDF(
         N,
         V,
         L,
@@ -221,7 +219,7 @@ vec3 CalculateDirectionalLight(
     );
 }
 
-vec3 CalculatePointLight(
+vec3 calculate_point_light(
     Core_Light light,
     vec3 position_ws,
     vec3 N,
@@ -252,7 +250,7 @@ vec3 CalculatePointLight(
 
     vec3 radiance = light.color.rgb * intensity * attenuation;
 
-    return EvaluateBRDF(
+    return evaluate_BRDF(
         N,
         V,
         L,
@@ -264,7 +262,7 @@ vec3 CalculatePointLight(
     );
 }
 
-vec3 CalculateSpotLight(
+vec3 calculate_spot_light(
     Core_Light light,
     vec3 position_ws,
     vec3 N,
@@ -309,7 +307,7 @@ vec3 CalculateSpotLight(
 
     vec3 radiance = light.color.rgb * intensity * attenuation * spot;
 
-    return EvaluateBRDF(
+    return evaluate_BRDF(
         N,
         V,
         L,
@@ -321,7 +319,7 @@ vec3 CalculateSpotLight(
     );
 }
 
-vec3 CalculateIBL(
+vec3 calculate_IBL(
     vec3 N,
     vec3 V,
     vec3 albedo,
@@ -343,7 +341,7 @@ vec3 CalculateIBL(
     env = pow(env, vec3(2.2));
 
     vec3 F =
-        FresnelSchlickRoughness(
+        fresnel_schlick_roughness(
             max(dot(N, V), 0.0),
             F0,
             roughness
@@ -393,19 +391,23 @@ void main() {
 
         switch (light_type) {
             case CORE_LIGHT_TYPE_DIRECTIONAL: {
-                direct_light += CalculateDirectionalLight(light, N, V, albedo, metallic, roughness, F0);
+                direct_light += calculate_directional_light(light, N, V, albedo, metallic, roughness, F0);
+            } break;
+
+            case CORE_LIGHT_TYPE_POINT: {
+                direct_light += calculate_point_light(light, v_position_ws, N, V, albedo, metallic, roughness, F0);
             } break;
 
             default: break;
         };
     }
 
-    vec3 indirect_light = CalculateIBL(N, V, albedo, metallic, roughness, F0);
+    vec3 indirect_light = calculate_IBL(N, V, albedo, metallic, roughness, F0);
 
     vec3 color = direct_light + indirect_light;
 
     // HDR tonemap
-    color = ACESFilm(color);
+    color = ACES_film(color);
 
     // gamma
     color = pow(color, vec3(1.0/2.2));
