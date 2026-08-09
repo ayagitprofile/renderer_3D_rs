@@ -6,9 +6,9 @@ use smol_str::{SmolStr, ToSmolStr};
 use super::data::{Material, MaterialID, MeshID, NamedShader, NamedTexture, Node, NodeID, ShaderID, TextureID};
 
 use crate::{
-    ShaderSource,
     graphics::{self, material_properties::MaterialProperties, mesh::Mesh, shader::Shader, texture::Texture2D, vertex},
     scene::data::AABB,
+    shader_source::ShaderSource,
     timer,
     transform::Transform,
 };

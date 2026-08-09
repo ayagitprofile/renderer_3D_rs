@@ -291,14 +291,14 @@ vec3 calculate_spot_light(
 
     float theta = dot(L, normalize(-light.direction.xyz));
 
-    float inner = light.spot_light_data.x;
-    float outer = light.spot_light_data.y;
+    float inner_cos = light.spot_light_data.x;
+    float outer_cos = light.spot_light_data.y;
 
-    float epsilon = inner - outer;
+    float epsilon = inner_cos - outer_cos;
 
     float spot =
         clamp(
-            (theta - outer) / epsilon,
+            (theta - outer_cos) / epsilon,
             0.0,
             1.0
         );
@@ -359,6 +359,8 @@ vec3 calculate_IBL(
 
 layout (location = 0) out vec4 out_color;
 
+uniform sampler2D ao_texture;
+
 in vec3 v_position_ws;
 in vec2 v_uv;
 in mat3 v_TBN;
@@ -402,7 +404,11 @@ void main() {
         };
     }
 
+    vec2 ss_uv = vec2(gl_FragCoord.xy + vec2(0.5)) / vec2(CORE_SCREEN_SIZE);
+    float ao = textureLod(ao_texture, ss_uv, 0).r;
+
     vec3 indirect_light = calculate_IBL(N, V, albedo, metallic, roughness, F0);
+    // indirect_light *= ao;
 
     vec3 color = direct_light + indirect_light;
 

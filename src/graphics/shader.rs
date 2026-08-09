@@ -43,6 +43,10 @@ impl Drop for Shader {
 }
 
 impl ComputeShader {
+    pub fn underlying_shader(&self) -> &Shader {
+        &self.shader
+    }
+
     pub fn compile_compute_from_c_string(source: &CStr) -> Self {
         let id = compile_compute_shader(source);
         let shader = Shader {
@@ -103,8 +107,12 @@ impl Shader {
         }
 
         None
+    }
 
-        // panic!("{}", format!("Uniform with such name: {} not found", name));
+    pub fn set_uniform_u32(&self, location: i32, value: u32) {
+        unsafe {
+            gl::ProgramUniform1ui(self.id, location, value);
+        }
     }
 
     pub fn map_texture_to_unit(&self, texture_uniform_location: i32, unit_index: i32) {

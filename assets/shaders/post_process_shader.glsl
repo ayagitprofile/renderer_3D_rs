@@ -57,24 +57,13 @@ vec3 vignette(vec2 uv, vec3 color, float strength)
     return color * clamp(v, 0.0, 1.0);
 }
 
-vec3 normal_oct_decode(vec2 e)
-{
-    e = e * 2.0 - 1.0;
-
-    vec3 n = vec3(e.x, e.y, 1.0 - abs(e.x) - abs(e.y));
-
-    if (n.z < 0.0)
-    {
-        n.xy = (1.0 - abs(n.yx)) * sign(n.xy);
-    }
-
-    return normalize(n);
-}
+#include "normal_compression.glsl"
 
 layout(location = 0) out vec4 out_color;
 
 uniform sampler2D ao_texture;
-uniform float u_chromatic_abberation = 0.0085;
+uniform float u_chromatic_abberation = 0.0;
+// uniform float u_chromatic_abberation = 0.0085;
 
 in vec2 v_uv;
 
@@ -88,7 +77,7 @@ void main() {
 
     float ao = texture(ao_texture, uv).r;
 
-    out_color = vec4(color_ab, 1);
+    // out_color = vec4(color_ab, 1);
     // out_color = vec4(normal_ws, 1);
-    // out_color = vec4((ao).xxx, 1);
+    out_color = vec4((ao).xxx, 1);
 }

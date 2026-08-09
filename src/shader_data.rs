@@ -1,4 +1,4 @@
-use glam::{Mat4, Vec4, vec4};
+use glam::{Mat4, UVec4, Vec4, uvec4, vec4};
 
 use crate::{graphics, transform::Transform};
 
@@ -8,8 +8,10 @@ struct GPUSideData {
     camera_vp_matrix: Mat4,
     camera_view_matrix: Mat4,
     camera_projection_matrix: Mat4,
+    camera_inverse_projection_matrix: Mat4,
     camera_position: Vec4,
     camera_forward: Vec4,
+    screen_size: UVec4,
 }
 
 impl GPUSideData {
@@ -33,7 +35,12 @@ impl GlobalShaderData {
         self.global_data_buffer.upload_data(self.gpu_side_data.as_slice());
     }
 
+    pub fn set_screen_size(&mut self, width: u32, height: u32) {
+        self.gpu_side_data.screen_size = uvec4(width, height, 0, 0);
+    }
+
     fn set_camera_matrices(&mut self, view_matrix: &Mat4, projection_matrix: &Mat4) {
+        self.gpu_side_data.camera_inverse_projection_matrix = projection_matrix.inverse();
         self.gpu_side_data.camera_view_matrix = *view_matrix;
         self.gpu_side_data.camera_projection_matrix = *projection_matrix;
         self.gpu_side_data.camera_vp_matrix =
@@ -59,8 +66,10 @@ impl GlobalShaderData {
             camera_vp_matrix: Mat4::IDENTITY,
             camera_view_matrix: Mat4::IDENTITY,
             camera_projection_matrix: Mat4::IDENTITY,
+            camera_inverse_projection_matrix: Mat4::IDENTITY,
             camera_forward: Vec4::ZERO,
             camera_position: Vec4::ZERO,
+            screen_size: UVec4::ZERO,
         };
 
         buffer.allocate(data.as_slice(), graphics::buffer::Usage::Dynamic);

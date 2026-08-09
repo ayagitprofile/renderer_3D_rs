@@ -195,6 +195,16 @@ fn get_input_data_format(channels: i32) -> u32 {
     }
 }
 
+fn number_of_channels_to_input_data_format(channels: u32) -> u32 {
+    match channels {
+        1 => gl::RED,
+        2 => gl::RG,
+        3 => gl::RGB,
+        4 => gl::RGBA,
+        _ => panic!("Incorrect number of channels: {}", channels),
+    }
+}
+
 impl Cubemap {
     pub fn load_from_memory(
         width: u32,
@@ -224,14 +234,6 @@ impl Cubemap {
 
             let data_array = [right, left, top, bottom, front, back];
 
-            let format = match data_channels {
-                1 => gl::RED,
-                2 => gl::RG,
-                3 => gl::RGB,
-                4 => gl::RGBA,
-                _ => panic!("Incorrect number of channels: {}", data_channels),
-            };
-
             for face_index in 0..6 {
                 let data = data_array[face_index];
 
@@ -244,7 +246,7 @@ impl Cubemap {
                     width as i32,
                     height as i32,
                     1,
-                    format,
+                    number_of_channels_to_input_data_format(data_channels),
                     gl::UNSIGNED_BYTE,
                     data as *const std::ffi::c_void,
                 );
@@ -291,6 +293,24 @@ impl Texture2D {
     pub fn bind_to_unit(&self, unit_index: u32) {
         unsafe {
             gl::BindTextureUnit(unit_index, self.id);
+        }
+    }
+
+    pub fn upload_data_f32(&self, width: u32, height: u32, number_of_channels: u32, data: *const f32) {
+        assert!(self.width as u32 == width && self.height as u32 == height);
+
+        unsafe {
+            gl::TextureSubImage2D(
+                self.id,
+                0,
+                0,
+                0,
+                width as i32,
+                height as i32,
+                number_of_channels_to_input_data_format(number_of_channels),
+                gl::FLOAT,
+                data as *const std::ffi::c_void,
+            );
         }
     }
 

@@ -8,13 +8,14 @@ use imgui::TreeNodeFlags;
 use sdl2::{event::Event, video::GLProfile};
 
 use crate::{
-    camera, camera_controller,
+    ambient_occlusion, camera, camera_controller,
     fullscreen_quad::FullscreenQuad,
     gl,
     graphics::{self, texture::Texture},
     input,
     scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene::Scene},
     shader_data,
+    transform::Transform,
 };
 
 static OPENGL_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -26,14 +27,14 @@ impl App {
         let _light_data = LightDataBuffer::new(&[
             LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 3.5f32)
                 .to_gpu_data(),
-            LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 2f32, 5f32).to_gpu_data(),
-            LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 2f32, 5f32).to_gpu_data(),
-            LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 2f32, 5f32).to_gpu_data(),
+            LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 3f32, 10f32).to_gpu_data(),
+            LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 3f32, 10f32).to_gpu_data(),
+            LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 3f32, 10f32).to_gpu_data(),
         ]);
 
         self.camera
             .transform
-            .set_position(-self.camera.transform.forward() * 6f32);
+            .set_position(-self.camera.transform.forward() * 4f32 + Transform::UP * 3f32);
 
         let mut camera_controller = camera_controller::CameraController::new();
 
@@ -74,14 +75,9 @@ impl App {
             false,
         );
 
-        let ambient_occlusion_texture = graphics::texture::Texture2D::create_texture(
-            window_size_x,
-            window_size_y,
-            graphics::texture::StorageFormat::R,
-            graphics::texture::FilteringMode::Nearest,
-            graphics::texture::WrappingMode::Clamp,
-            false,
-        );
+        let ao = ambient_occlusion::AmbientOcclusion::new(window_size_x as u32, window_size_y as u32);
+
+        ao.set_framebuffer_textures(&depth_texture, &normal_texture);
 
         const COLOR_TEXTURE_TARGET: usize = 0;
         const NORMAL_TEXTURE_TARGET: usize = 1;
@@ -113,7 +109,7 @@ impl App {
         graphics::utility::try_set_bindless_texture(
             &fs_quad.shader,
             scene::textures::AO_TEXTURE,
-            ambient_occlusion_texture.bindless_handle(),
+            ao.texture().bindless_handle(),
         );
 
         'main_loop: loop {
@@ -200,6 +196,8 @@ impl App {
 
             camera_controller.update(&mut self.camera, delta_time, input);
 
+            shader_data.set_screen_size(self.sdl_window.size().0, self.sdl_window.size().1);
+
             shader_data.set_camera_data(
                 &self.camera.view_matrix(),
                 &self.camera.projection_matrix(),
@@ -207,6 +205,8 @@ impl App {
             );
 
             shader_data.upload_data();
+
+            ao.calculate_ambient_occlusion();
 
             let rendering_stats = scene_renderer.prepare_rendering_data(&scene, &self.camera);
 

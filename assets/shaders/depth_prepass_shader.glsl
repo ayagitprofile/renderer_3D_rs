@@ -22,19 +22,7 @@ void main() {
 
 #shader frag
 
-vec2 normal_oct_encoding(vec3 n)
-{
-    n /= (abs(n.x) + abs(n.y) + abs(n.z));
-
-    vec2 p = n.xy;
-
-    if (n.z < 0.0)
-    {
-        p = (1.0 - abs(p.yx)) * sign(p);
-    }
-
-    return p * 0.5 + 0.5;
-}
+#include "normal_compression.glsl"
 
 in vec3 v_normal_ws;
 
