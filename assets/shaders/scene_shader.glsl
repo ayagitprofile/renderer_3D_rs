@@ -325,36 +325,60 @@ vec3 calculate_IBL(
     vec3 albedo,
     float metallic,
     float roughness,
-    vec3 F0)
+    vec3 F0,
+    float ao)
 {
-    vec3 R = reflect(-V, N);
+// #define HDR_CUBEMAP
+    float NdotV = max(dot(N, V), 0.0);
 
-    float maxLod = textureQueryLevels(CORE_CUBEMAP) - 1;
-
-    vec3 env =
-        textureLod(
-            CORE_CUBEMAP,
-            R,
-            roughness * maxLod
-        ).rgb;
-
-    env = pow(env, vec3(2.2));
-
-    vec3 F =
-        fresnel_schlick_roughness(
-            max(dot(N, V), 0.0),
-            F0,
-            roughness
-        );
+    vec3 F = fresnel_schlick_roughness(
+        NdotV,
+        F0,
+        roughness
+    );
 
     vec3 kS = F;
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
 
-    vec3 ambient =
-        0.03 * albedo * kD +
-        env * kS;
+    // Diffuse IBL
+    // Approximate irradiance by sampling the environment using
+    // the surface normal.
 
-    return ambient;
+    float maxLod = float(textureQueryLevels(CORE_CUBEMAP) - 1);
+
+    vec3 irradiance = textureLod(
+        CORE_CUBEMAP,
+        N,
+        maxLod
+    ).rgb;
+
+#ifndef HDR_CUBEMAP
+    irradiance = pow(irradiance, vec3(2.2));
+#endif
+
+    vec3 diffuse_ibl =
+        irradiance * albedo * kD;
+
+    // SSAO affects diffuse ambient illumination.
+    diffuse_ibl *= ao;
+
+    // Specular IBL
+
+    vec3 R = reflect(-V, N);
+
+    vec3 env = textureLod(
+        CORE_CUBEMAP,
+        R,
+        roughness * maxLod
+    ).rgb;
+
+#ifndef HDR_CUBEMAP
+    env = pow(env, vec3(2.2));
+#endif
+
+    vec3 specular_ibl = env * kS;
+
+    return diffuse_ibl + specular_ibl;
 }
 
 layout (location = 0) out vec4 out_color;
@@ -407,10 +431,9 @@ void main() {
     vec2 ss_uv = vec2(gl_FragCoord.xy + vec2(0.5)) / vec2(CORE_SCREEN_SIZE);
     float ao = textureLod(ao_texture, ss_uv, 0).r;
 
-    vec3 indirect_light = calculate_IBL(N, V, albedo, metallic, roughness, F0);
-    // indirect_light *= ao;
+    vec3 indirect_light = calculate_IBL(N, V, albedo, metallic, roughness, F0, 1.0);
 
-    vec3 color = direct_light + indirect_light;
+    vec3 color = (direct_light + indirect_light) * ao;
 
     // HDR tonemap
     color = ACES_film(color);

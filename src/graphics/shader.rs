@@ -13,6 +13,7 @@ type UniformDataStorage = smallvec::SmallVec<[UniformData; 5]>;
 #[repr(u32)]
 pub enum ComputeMemoryBarrier {
     TextureFetch = gl::TEXTURE_FETCH_BARRIER_BIT,
+    ImageAccess = gl::SHADER_IMAGE_ACCESS_BARRIER_BIT,
     SSBORead = gl::SHADER_STORAGE_BARRIER_BIT,
     All = gl::ALL_BARRIER_BITS,
 }
@@ -160,7 +161,6 @@ impl Shader {
 
             // Ignore uniforms belonging to UBOs
             if block_index != -1 {
-                println!("[Shader] Warning: Failed to preload uniform data because UBOs are not supported");
                 continue;
             }
 

@@ -77,7 +77,5 @@ void main() {
 
     float ao = texture(ao_texture, uv).r;
 
-    // out_color = vec4(color_ab, 1);
-    // out_color = vec4(normal_ws, 1);
-    out_color = vec4((ao).xxx, 1);
+    out_color = vec4(color_ab, 1);
 }

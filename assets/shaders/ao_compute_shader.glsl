@@ -9,11 +9,15 @@ layout(std430, binding = 2) readonly buffer kernel_sample_buffer {
     vec4 samples[];
 } kernel_buffer;
 
+layout(std140, binding = 0) uniform ssao_ubo {
+    float radius;
+    float depth_bias;
+    float strength;
+} ao_config;
+
 uniform sampler2D fb_depth_texture;
 uniform sampler2D fb_normal_texture;
 uniform sampler2D random_direction_texture;
-
-uniform float u_radius = 0.2;
 
 // Must match the image unit used by glBindImageTexture().
 layout(binding = 0, r8) uniform writeonly image2D out_ao_texture_image;
@@ -127,8 +131,8 @@ void main()
             random_vec
         );
 
-    const float ao_radius = 0.2;
-    const float ao_depth_bias = 0.01;
+    // const float ao_radius = 0.2;
+    // const float ao_depth_bias = 0.01;
 
     float occlusion = 0.0;
 
@@ -140,7 +144,7 @@ void main()
 
         const vec3 sample_position_vs =
             position_vs +
-            sample_direction * ao_radius;
+            sample_direction * ao_config.radius;
 
         // Project sample position back to screen space
 
@@ -205,19 +209,19 @@ void main()
 
         float depth_difference = scene_position_vs.z - sample_position_vs.z;
 
-        if (depth_difference > ao_depth_bias)
+        if (depth_difference > ao_config.depth_bias)
         {
 #if 0
             float sample_distance = length(sample_position_vs - position_vs);
 
             float scene_distance = length(scene_position_vs - position_vs);
 
-            float range_weight = 1.0 - smoothstep(0.0, ao_radius, abs(sample_distance - scene_distance));
+            float range_weight = 1.0 - smoothstep(0.0, ao_config.radius, abs(sample_distance - scene_distance));
 #else
             float range_weight =
                 1.0 - smoothstep(
                     0.0,
-                    ao_radius,
+                    ao_config.radius,
                     length(scene_position_vs - sample_position_vs)
                 );
 #endif
@@ -231,9 +235,7 @@ void main()
 
     occlusion /= float(kernel_sample_count);
 
-    const float ao_strength = 1.5;
-
-    const float ao_value = 1.0 - clamp(occlusion * ao_strength, 0.0, 1.0);
+    const float ao_value = 1.0 - clamp(occlusion * ao_config.strength, 0.0, 1.0);
 
     imageStore(
         out_ao_texture_image,

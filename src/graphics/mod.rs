@@ -2,6 +2,7 @@
 
 pub mod buffer;
 pub mod framebuffer;
+pub mod fullscreen_quad;
 pub mod material_properties;
 pub mod mesh;
 pub mod shader;

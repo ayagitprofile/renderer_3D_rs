@@ -5,12 +5,10 @@ use std::{
 
 use glam::Vec3;
 use imgui::TreeNodeFlags;
-use sdl2::{event::Event, video::GLProfile};
+use sdl2::{event::Event, keyboard::Keycode, video::GLProfile};
 
 use crate::{
-    ambient_occlusion, camera, camera_controller,
-    fullscreen_quad::FullscreenQuad,
-    gl,
+    ambient_occlusion, camera, camera_controller, gl,
     graphics::{self, texture::Texture},
     input,
     scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene::Scene},
@@ -25,7 +23,7 @@ impl App {
         let mut shader_data = shader_data::GlobalShaderData::new();
 
         let _light_data = LightDataBuffer::new(&[
-            LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 3.5f32)
+            LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 1.9f32)
                 .to_gpu_data(),
             LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 3f32, 10f32).to_gpu_data(),
             LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 3f32, 10f32).to_gpu_data(),
@@ -42,75 +40,9 @@ impl App {
 
         scene.load_data_from_file(Path::new("assets/scenes/scene.glb"));
 
-        let mut scene_renderer = scene::renderer::Renderer::new();
-
         let (window_size_x, window_size_y) = (self.sdl_window.size().0 as i32, self.sdl_window.size().1 as i32);
 
-        let mut framebuffer = graphics::framebuffer::Framebuffer::new();
-
-        let depth_texture = graphics::texture::Texture2D::create_texture(
-            window_size_x,
-            window_size_y,
-            graphics::texture::StorageFormat::Depth24FStencil,
-            graphics::texture::FilteringMode::Nearest,
-            graphics::texture::WrappingMode::Clamp,
-            false,
-        );
-
-        let color_texture = graphics::texture::Texture2D::create_texture(
-            window_size_x,
-            window_size_y,
-            graphics::texture::StorageFormat::SRGBA,
-            graphics::texture::FilteringMode::Bilinear,
-            graphics::texture::WrappingMode::Clamp,
-            false,
-        );
-
-        let normal_texture = graphics::texture::Texture2D::create_texture(
-            window_size_x,
-            window_size_y,
-            graphics::texture::StorageFormat::RG16F,
-            graphics::texture::FilteringMode::Nearest,
-            graphics::texture::WrappingMode::Clamp,
-            false,
-        );
-
-        let ao = ambient_occlusion::AmbientOcclusion::new(window_size_x as u32, window_size_y as u32);
-
-        ao.set_framebuffer_textures(&depth_texture, &normal_texture);
-
-        const COLOR_TEXTURE_TARGET: usize = 0;
-        const NORMAL_TEXTURE_TARGET: usize = 1;
-
-        framebuffer.set_depth_texture_render_target(depth_texture.id(), depth_texture.storage_format());
-        framebuffer.set_color_texture_render_target(color_texture.id(), COLOR_TEXTURE_TARGET);
-        framebuffer.set_color_texture_render_target(normal_texture.id(), NORMAL_TEXTURE_TARGET);
-
-        let fs_quad = FullscreenQuad::new(std::path::Path::new("assets/shaders/post_process_shader.glsl"));
-
-        graphics::utility::try_set_bindless_texture(
-            &fs_quad.shader,
-            scene::textures::FRAMEBUFFER_COLOR_TEXTURE,
-            color_texture.bindless_handle(),
-        );
-
-        graphics::utility::try_set_bindless_texture(
-            &fs_quad.shader,
-            scene::textures::FRAMEBUFFER_DEPTH_TEXTURE,
-            depth_texture.bindless_handle(),
-        );
-
-        graphics::utility::try_set_bindless_texture(
-            &fs_quad.shader,
-            scene::textures::FRAMEBUFFER_NORMAL_TEXTURE,
-            normal_texture.bindless_handle(),
-        );
-
-        graphics::utility::try_set_bindless_texture(
-            &fs_quad.shader,
-            scene::textures::AO_TEXTURE,
-            ao.texture().bindless_handle(),
-        );
+        let mut scene_renderer = scene::renderer::Renderer::new((window_size_x as u32, window_size_y as u32));
 
         'main_loop: loop {
             if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
@@ -121,7 +53,15 @@ impl App {
             self.input_container.new_frame();
 
             for event in self.sdl_event_pump.poll_iter() {
-                self.imgui_sdl_platform.handle_event(&mut self.imgui_context, &event);
+                if !matches!(
+                    event,
+                    Event::KeyDown {
+                        keycode: Some(Keycode::Tab),
+                        ..
+                    }
+                ) {
+                    self.imgui_sdl_platform.handle_event(&mut self.imgui_context, &event);
+                }
 
                 match event {
                     Event::Quit { .. } => {
@@ -206,30 +146,24 @@ impl App {
 
             shader_data.upload_data();
 
-            ao.calculate_ambient_occlusion();
-
             let rendering_stats = scene_renderer.prepare_rendering_data(&scene, &self.camera);
 
-            framebuffer.clear_all_attachments();
-            framebuffer.bind();
+            scene_renderer.new_frame();
 
-            framebuffer.set_active_render_target(NORMAL_TEXTURE_TARGET);
             scene_renderer.render_depth_prepass(&scene);
 
-            framebuffer.set_active_render_target(COLOR_TEXTURE_TARGET);
-            scene_renderer.render(&scene);
+            scene_renderer.ssao().compute_ambient_occlusion();
 
-            graphics::framebuffer::bind_default_framebuffer();
+            scene_renderer.render_forward_lighting(&scene);
 
-            fs_quad.render();
+            scene_renderer.render_post_processing();
 
             self.imgui_sdl_platform
                 .prepare_frame(&mut self.imgui_context, &self.sdl_window, &self.sdl_event_pump);
 
-            let frame = self.imgui_context.new_frame();
+            let ui = self.imgui_context.new_frame();
 
-            frame
-                .window("Window")
+            ui.window("Window")
                 .size([120f32, 80f32], imgui::Condition::Appearing)
                 .always_auto_resize(true)
                 .movable(false)
@@ -238,16 +172,30 @@ impl App {
                 .title_bar(false)
                 .position([0f32, 0f32], imgui::Condition::Always)
                 .build(|| {
-                    frame.text(format!("FPS: {}", (1f32 / delta_time) as i32));
-                    if frame.collapsing_header("Camera", TreeNodeFlags::DEFAULT_OPEN) {
+                    ui.text(format!("FPS: {}", (1f32 / delta_time) as i32));
+                    if ui.collapsing_header("Camera", TreeNodeFlags::DEFAULT_OPEN) {
                         let pos = vec3_to_string(self.camera.transform.position());
                         let fwd = vec3_to_string(self.camera.transform.forward());
-                        frame.text(format!("Position: {}", pos));
-                        frame.text(format!("Forward: {}", fwd));
+                        ui.text(format!("Position: {}", pos));
+                        ui.text(format!("Forward: {}", fwd));
                     }
-                    if frame.collapsing_header("Rendering", TreeNodeFlags::DEFAULT_OPEN) {
-                        frame.text(format!("Object count: {}", rendering_stats.total_objects));
-                        frame.text(format!("Visible objects: {}", rendering_stats.visible_objects));
+                    if ui.collapsing_header("Rendering", TreeNodeFlags::DEFAULT_OPEN) {
+                        ui.text(format!("Object count: {}", rendering_stats.total_objects));
+                        ui.text(format!("Visible objects: {}", rendering_stats.visible_objects));
+                    }
+                    if ui.collapsing_header("SSAO", TreeNodeFlags::DEFAULT_OPEN) {
+                        let mut r = scene_renderer.ssao().radius();
+                        if ui.slider("Radius", 0f32, 1f32, &mut r) {
+                            scene_renderer.ssao_mut().set_radius(r);
+                        }
+                        let mut db = scene_renderer.ssao().depth_bias();
+                        if ui.slider("Depth bias", 0f32, 0.1f32, &mut db) {
+                            scene_renderer.ssao_mut().set_depth_bias(db);
+                        }
+                        let mut s = scene_renderer.ssao().strength();
+                        if ui.slider("Strength", 0f32, 10f32, &mut s) {
+                            scene_renderer.ssao_mut().set_strength(s);
+                        }
                     }
                 });
 

@@ -59,6 +59,18 @@ impl StorageFormat {
 }
 
 pub trait Texture {
+    fn clear(&self, color: [f32; 4]) {
+        unsafe {
+            gl::ClearTexImage(
+                self.id(),
+                0,
+                gl::RGBA,
+                gl::FLOAT,
+                color.as_ptr() as *const std::ffi::c_void,
+            );
+        }
+    }
+
     fn set_filtering_mode(&self, filtering: FilteringMode) {
         debug_assert!(
             self.bindless_handle() == 0,

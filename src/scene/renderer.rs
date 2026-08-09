@@ -1,14 +1,16 @@
 use glam::{Mat4, Vec3, Vec4};
 
 use super::{data, scene::Scene};
+use crate::ambient_occlusion::AmbientOcclusion;
 use crate::camera::Camera;
+use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::material_properties::MaterialProperties;
 use crate::graphics::mesh::Mesh;
 use crate::graphics::shader::Shader;
-use crate::graphics::texture::Texture;
+use crate::graphics::texture::{self, Texture};
 use crate::scene::skybox::Skybox;
 use crate::shader_source::ShaderSource;
-use crate::{gl, graphics};
+use crate::{ambient_occlusion, gl, graphics};
 
 const SHADER_MODEL_MATRIX_UNIFORM_NAME: &str = "u_model_matrix";
 
@@ -17,6 +19,20 @@ pub struct Renderer {
     draw_call_data: Vec<DrawCallData>,
     depth_prepass_shader: (Shader, MaterialProperties),
     skybox: Skybox,
+
+    render_targets: RenderTargets,
+
+    ambient_occlusion: ambient_occlusion::AmbientOcclusion,
+
+    post_process_fs_quad: graphics::fullscreen_quad::FullscreenQuad,
+}
+
+pub struct RenderTargets {
+    framebuffer: Framebuffer,
+
+    color_texture: texture::Texture2D,
+    depth_texture: texture::Texture2D,
+    normal_texture: texture::Texture2D,
 }
 
 struct DrawCallData {
@@ -75,12 +91,6 @@ impl Plane {
 impl CameraFrustum {
     pub fn intersects_aabb(&self, aabb: &AABBVec3) -> bool {
         for plane in &self.planes {
-            // let p = Vec3::new(
-            //     if plane.normal.x >= 0.0 { aabb.max.x } else { aabb.min.x },
-            //     if plane.normal.y >= 0.0 { aabb.max.y } else { aabb.min.y },
-            //     if plane.normal.z >= 0.0 { aabb.max.z } else { aabb.min.z },
-            // );
-
             let mask = plane.normal.cmpge(Vec3::ZERO);
             let p = Vec3::select(mask, aabb.max, aabb.min);
 
@@ -178,15 +188,33 @@ impl Renderer {
         }
     }
 
-    pub fn new() -> Self {
+    pub fn new(resolution: (u32, u32)) -> Self {
         let depth_prepass_source =
             ShaderSource::load_from_file(std::path::Path::new("assets/shaders/depth_prepass_shader.glsl"));
+
+        let render_targets = RenderTargets::new(resolution.0, resolution.1);
+
+        let ao = ambient_occlusion::AmbientOcclusion::new(resolution.0, resolution.1);
+        ao.set_input_textures(&render_targets.depth_texture, &render_targets.normal_texture);
+
+        let fs_quad = graphics::fullscreen_quad::FullscreenQuad::new(std::path::Path::new(
+            "assets/shaders/post_process_shader.glsl",
+        ));
+
+        graphics::utility::try_set_bindless_texture(
+            &fs_quad.shader,
+            super::textures::FRAMEBUFFER_COLOR_TEXTURE,
+            render_targets.color_texture.bindless_handle(),
+        );
 
         let renderer = Renderer {
             current_mat_props: MaterialProperties::DEFAULT,
             draw_call_data: Vec::with_capacity(128),
             depth_prepass_shader: (depth_prepass_source.compile(), *depth_prepass_source.mat_props()),
             skybox: Skybox::new(),
+            render_targets: render_targets,
+            ambient_occlusion: ao,
+            post_process_fs_quad: fs_quad,
         };
 
         graphics::utility::try_set_bindless_texture(
@@ -199,6 +227,10 @@ impl Renderer {
     }
 
     pub fn render_depth_prepass(&self, scene: &Scene) {
+        self.render_targets
+            .framebuffer
+            .set_active_render_target(RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
+
         let shader = &self.depth_prepass_shader.0;
         shader.bind();
 
@@ -225,12 +257,21 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, scene: &Scene) {
+    pub fn render_forward_lighting(&mut self, scene: &Scene) {
+        self.render_targets
+            .framebuffer
+            .set_active_render_target(RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
+
         for data in self.draw_call_data.iter() {
             self.render_node(scene, data.node_id, &data.object_to_world);
         }
 
         self.render_mesh(&self.skybox.mesh, &self.skybox.shader, &self.skybox.mat_props);
+    }
+
+    pub fn render_post_processing(&self) {
+        graphics::framebuffer::bind_default_framebuffer();
+        self.post_process_fs_quad.render();
     }
 
     fn render_mesh(&self, mesh: &Mesh, shader: &Shader, mat_props: &MaterialProperties) {
@@ -273,7 +314,17 @@ impl Renderer {
             );
         }
 
-        graphics::utility::try_set_bindless_texture(&shader, "cubemap_texture", self.skybox.cubemap.bindless_handle());
+        graphics::utility::try_set_bindless_texture(
+            shader,
+            super::textures::CUBEMAP_TEXTURE,
+            self.skybox.cubemap.bindless_handle(),
+        );
+
+        graphics::utility::try_set_bindless_texture(
+            shader,
+            super::textures::AO_TEXTURE,
+            self.ambient_occlusion.ao_compute_result_texture().bindless_handle(),
+        );
 
         Renderer::upload_model_matrix(shader, model_matrix);
 
@@ -283,6 +334,93 @@ impl Renderer {
     fn upload_model_matrix(shader: &Shader, model_matrix: &glam::Mat4) {
         if let Some(location) = shader.find_uniform_location(SHADER_MODEL_MATRIX_UNIFORM_NAME) {
             shader.set_uniform_mat4(location, &model_matrix.to_cols_array());
+        }
+    }
+
+    pub fn new_frame(&self) {
+        self.render_targets.framebuffer.clear_all_attachments();
+        self.render_targets.framebuffer.bind();
+    }
+
+    pub fn ssao_mut(&mut self) -> &mut AmbientOcclusion {
+        &mut self.ambient_occlusion
+    }
+
+    pub fn ssao(&self) -> &AmbientOcclusion {
+        &self.ambient_occlusion
+    }
+}
+
+impl RenderTargets {
+    pub const COLOR_TEXTURE_ATTACHMENT_INDEX: usize = 0;
+    pub const NORMAL_TEXTURE_ATTACHMENT_INDEX: usize = 1;
+
+    fn create_texture_set(width: u32, height: u32) -> (texture::Texture2D, texture::Texture2D, texture::Texture2D) {
+        let (width, height) = (width as i32, height as i32);
+
+        let color_texture = texture::Texture2D::create_texture(
+            width,
+            height,
+            texture::StorageFormat::SRGBA,
+            texture::FilteringMode::Bilinear,
+            texture::WrappingMode::Clamp,
+            false,
+        );
+
+        let depth_texture = texture::Texture2D::create_texture(
+            width,
+            height,
+            texture::StorageFormat::Depth24FStencil,
+            texture::FilteringMode::Nearest,
+            texture::WrappingMode::Clamp,
+            false,
+        );
+
+        let normal_texture = texture::Texture2D::create_texture(
+            width,
+            height,
+            texture::StorageFormat::RG16F,
+            texture::FilteringMode::Nearest,
+            texture::WrappingMode::Clamp,
+            false,
+        );
+
+        (color_texture, depth_texture, normal_texture)
+    }
+
+    fn attach_textures(&mut self, color: texture::Texture2D, depth: texture::Texture2D, normal: texture::Texture2D) {
+        self.color_texture = color;
+        self.depth_texture = depth;
+        self.normal_texture = normal;
+
+        self.framebuffer
+            .set_depth_texture_render_target(self.depth_texture.id(), self.depth_texture.storage_format());
+        self.framebuffer
+            .set_color_texture_render_target(self.color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
+        self.framebuffer
+            .set_color_texture_render_target(self.normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let (color_texture, depth_texture, normal_texture) = RenderTargets::create_texture_set(width, height);
+        self.attach_textures(color_texture, depth_texture, normal_texture);
+    }
+
+    pub fn new(width: u32, height: u32) -> Self {
+        let (color_texture, depth_texture, normal_texture) = RenderTargets::create_texture_set(width, height);
+
+        let mut framebuffer = Framebuffer::new();
+
+        framebuffer.set_depth_texture_render_target(depth_texture.id(), depth_texture.storage_format());
+        framebuffer.set_color_texture_render_target(color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
+        framebuffer
+            .set_color_texture_render_target(normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
+
+        Self {
+            framebuffer,
+            color_texture,
+            depth_texture,
+            normal_texture,
         }
     }
 }

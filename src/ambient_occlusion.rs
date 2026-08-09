@@ -11,6 +11,7 @@ use crate::{
     },
     scene,
     shader_source::ShaderSource,
+    timer,
 };
 
 const KERNEL_SAMPLE_COUNT: usize = 32;
@@ -19,20 +20,31 @@ const RANDOM_DIRECTION_TEXTURE_WIDTH: usize = 8;
 const COMPUTE_SHADER_RANDOM_DIRECTION_TEXTURE_NAME: &str = "random_direction_texture";
 const COMPUTE_SHADER_KERNEL_DATA_BUFFER_BINDING: u32 = scene::buffers::SHADER_FREE_DATA_BUFFER_BINDING_INDEX;
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SSAOComputeUniformData {
+    pub radius: f32,
+    pub depth_bias: f32,
+    pub strength: f32,
+}
+
 pub struct AmbientOcclusion {
     ao_compute_shader: ComputeShader,
     output_texture: texture::Texture2D,
 
     _random_directions_texture: texture::Texture2D,
     _kernel_samples_buffer: GraphicsBuffer,
+
+    uniform_data: SSAOComputeUniformData,
+    uniform_data_buffer: GraphicsBuffer,
 }
 
 impl AmbientOcclusion {
-    pub fn texture(&self) -> &texture::Texture2D {
+    pub fn ao_compute_result_texture(&self) -> &texture::Texture2D {
         &self.output_texture
     }
 
-    pub fn set_framebuffer_textures(&self, depth_texture: &texture::Texture2D, normal_texture: &texture::Texture2D) {
+    pub fn set_input_textures(&self, depth_texture: &texture::Texture2D, normal_texture: &texture::Texture2D) {
         graphics::utility::try_set_bindless_texture(
             self.ao_compute_shader.underlying_shader(),
             scene::textures::FRAMEBUFFER_DEPTH_TEXTURE,
@@ -46,7 +58,22 @@ impl AmbientOcclusion {
         );
     }
 
-    pub fn calculate_ambient_occlusion(&self) {
+    pub fn compute_ambient_occlusion(&self) {
+        let uniform_data = SSAOComputeUniformData {
+            radius: self.uniform_data.radius.clamp(0f32, 100f32),
+            depth_bias: self.uniform_data.depth_bias.clamp(0f32, 1f32),
+            strength: self.uniform_data.strength.clamp(0f32, 10f32),
+        };
+
+        if self.uniform_data.strength < 0.01 {
+            self.output_texture.clear([1f32; 4]);
+            return;
+        }
+
+        self.uniform_data_buffer
+            .set_binding(graphics::buffer::BindingTarget::UniformBuffer, 0);
+        self.uniform_data_buffer.upload_data(&[uniform_data]);
+
         unsafe {
             gl::BindImageTexture(0, self.output_texture.id(), 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::R16F);
         }
@@ -61,11 +88,40 @@ impl AmbientOcclusion {
             (texture_height + COMPUTE_THREADS_PER_WORK_GROUP_Y - 1) / COMPUTE_THREADS_PER_WORK_GROUP_Y,
         );
 
-        self.ao_compute_shader
-            .dispatch(work_groups_x, work_groups_y, Some(shader::ComputeMemoryBarrier::All));
+        self.ao_compute_shader.dispatch(
+            work_groups_x,
+            work_groups_y,
+            Some(shader::ComputeMemoryBarrier::TextureFetch),
+        );
+    }
+
+    pub fn set_radius(&mut self, radius: f32) {
+        self.uniform_data.radius = radius;
+    }
+
+    pub fn set_depth_bias(&mut self, depth_bias: f32) {
+        self.uniform_data.depth_bias = depth_bias;
+    }
+
+    pub fn set_strength(&mut self, strength: f32) {
+        self.uniform_data.strength = strength;
+    }
+
+    pub fn radius(&self) -> f32 {
+        self.uniform_data.radius
+    }
+
+    pub fn depth_bias(&self) -> f32 {
+        self.uniform_data.depth_bias
+    }
+
+    pub fn strength(&self) -> f32 {
+        self.uniform_data.strength
     }
 
     pub fn new(texture_width: u32, texture_height: u32) -> Self {
+        let _timer = timer::ScopedTimer::start("Creating SSAO data");
+
         let output_texture = texture::Texture2D::create_texture(
             texture_width as i32,
             texture_height as i32,
@@ -116,11 +172,22 @@ impl AmbientOcclusion {
             COMPUTE_SHADER_KERNEL_DATA_BUFFER_BINDING,
         );
 
+        let uniform_data = SSAOComputeUniformData {
+            radius: 0.2f32,
+            depth_bias: 0.01f32,
+            strength: 1f32,
+        };
+
+        let mut uniform_data_buffer = GraphicsBuffer::new();
+        uniform_data_buffer.allocate(&[uniform_data], graphics::buffer::Usage::Dynamic);
+
         Self {
-            output_texture,
             ao_compute_shader,
             _random_directions_texture: random_direction_texture,
             _kernel_samples_buffer: kernel_samples_buffer,
+            output_texture,
+            uniform_data,
+            uniform_data_buffer,
         }
     }
 
