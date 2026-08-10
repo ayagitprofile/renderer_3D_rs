@@ -1,6 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    f32::consts::E,
+};
 
 use glam::Mat4;
+use gltf::material::AlphaMode;
 use smol_str::{SmolStr, ToSmolStr};
 
 use super::data::{Material, MaterialID, MeshID, NamedShader, NamedTexture, Node, NodeID, ShaderID, TextureID};
@@ -43,7 +47,9 @@ pub struct Scene {
     shader_mat_props: HashMap<SmolStr, MaterialProperties>,
     default_texture_ids: DefaultTextures,
     shader_name_mapping: Vec<ShaderMaterialMapping>,
-    default_shader: (ShaderID, MaterialProperties),
+
+    default_opaque_shader: (ShaderID, MaterialProperties),
+    default_transparent_shader: (ShaderID, MaterialProperties),
 }
 
 struct DefaultTextures {
@@ -273,6 +279,12 @@ impl Scene {
     ) -> MaterialID {
         let material_name = gltf_material.name().unwrap_or_default().to_string();
 
+        let (default_scene_shader, default_mat_props) = if gltf_material.alpha_mode() == AlphaMode::Opaque {
+            self.default_opaque_shader
+        } else {
+            self.default_transparent_shader
+        };
+
         let shader_id = if let Some(mapping) = self
             .shader_name_mapping
             .iter()
@@ -282,21 +294,37 @@ impl Scene {
                 self.shaders
                     .iter()
                     .position(|shader| shader.name == mapping.shader_name)
-                    .unwrap_or(self.default_shader.0.index),
+                    .unwrap_or(default_scene_shader.index),
             )
         } else {
-            self.default_shader.0
+            default_scene_shader
         };
 
         let shader_name = self.get_shader_name(shader_id);
 
-        let mat_props = self
+        let mut mat_props = self
             .shader_mat_props
             .get(shader_name)
             .copied()
-            .unwrap_or(self.default_shader.1);
+            .unwrap_or(default_mat_props);
 
         let texture_ids = super::data::TextureIDStorage::new();
+
+        // if shader for this material is custom, dont assign properties of gltf material
+        if shader_id == self.default_opaque_shader.0 || shader_id == self.default_transparent_shader.0 {
+            mat_props.surface_type = match gltf_material.alpha_mode() {
+                gltf::material::AlphaMode::Mask | gltf::material::AlphaMode::Blend => {
+                    graphics::material_properties::SurfaceType::Transparent
+                }
+                gltf::material::AlphaMode::Opaque => graphics::material_properties::SurfaceType::Opaque,
+            };
+
+            mat_props.cull_mode = if gltf_material.double_sided() {
+                graphics::material_properties::CullMode::Disabled
+            } else {
+                graphics::material_properties::CullMode::Back
+            };
+        }
 
         let material_id = self.add_material(Material::new(shader_id, &mat_props, shader_name, texture_ids));
 
@@ -394,7 +422,14 @@ impl Scene {
     pub fn new(custom_shaders: Option<CustomShaders>) -> Self {
         let (default_textures, default_texture_ids) = Scene::create_default_textures();
 
-        let source = ShaderSource::load_from_file(std::path::Path::new("assets/shaders/scene_shader.glsl"));
+        let scene_shader_source =
+            ShaderSource::load_from_file(std::path::Path::new("assets/shaders/scene_shader.glsl"));
+
+        let mut transparent_mat_props = *scene_shader_source.mat_props();
+
+        transparent_mat_props.surface_type = graphics::material_properties::SurfaceType::Transparent;
+        transparent_mat_props.depth_writing_enabled = false;
+        transparent_mat_props.depth_test_mode = graphics::material_properties::DepthTestMode::LessEqual;
 
         let mut scene = Scene {
             meshes: Vec::<Mesh>::new(),
@@ -406,12 +441,18 @@ impl Scene {
             shader_mat_props: HashMap::<SmolStr, MaterialProperties>::new(),
             default_texture_ids: default_texture_ids,
             shader_name_mapping: Vec::new(),
-            default_shader: (ShaderID::new(0), *source.mat_props()),
+            default_opaque_shader: (ShaderID::new(0), *scene_shader_source.mat_props()),
+            default_transparent_shader: (ShaderID::new(1), transparent_mat_props),
         };
 
-        scene.add_shader(NamedShader {
-            shader: source.compile(),
-            name: "Default scene shader".to_smolstr(),
+        scene.default_opaque_shader.0 = scene.add_shader(NamedShader {
+            shader: scene_shader_source.compile(),
+            name: "Default opaque scene shader".to_smolstr(),
+        });
+
+        scene.default_transparent_shader.0 = scene.add_shader(NamedShader {
+            shader: scene_shader_source.compile(),
+            name: "Default transparent scene shader".to_smolstr(),
         });
 
         if let Some(shaders) = custom_shaders {

@@ -399,6 +399,7 @@ void main() {
 
     const vec4 albedo_sample = texture(CORE_ALBEDO_MAP, uv);
     const vec3 albedo = albedo_sample.rgb;
+    const float alpha = albedo_sample.w;
 
     const vec3 normal_ts = texture(CORE_NORMAL_MAP, uv).xyz * 2.0 - 1.0;
 
@@ -442,5 +443,5 @@ void main() {
     // gamma
     color = pow(color, vec3(1.0/2.2));
 
-    out_color = vec4(color, 1);
+    out_color = vec4(color, alpha);
 }

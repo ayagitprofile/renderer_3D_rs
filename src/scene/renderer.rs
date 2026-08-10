@@ -226,7 +226,8 @@ impl Renderer {
 
         RenderingStats {
             total_objects: total_objects,
-            visible_objects: self.opaque_object_draw_call_data.len() as u32,
+            visible_objects: (self.opaque_object_draw_call_data.len() + self.transparent_object_draw_call_data.len())
+                as u32,
             frame_data_preparation_time: timer.elapsed(),
         }
     }
