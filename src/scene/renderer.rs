@@ -188,13 +188,26 @@ impl Renderer {
         }
     }
 
+    fn calculate_ssao_resolution(resolution: (u32, u32)) -> (u32, u32) {
+        (resolution.0 * 3 / 4, resolution.1 * 3 / 4)
+    }
+
+    pub fn resize(&mut self, resolution: (u32, u32)) {
+        println!("Renderer.resize called");
+
+        self.render_targets = RenderTargets::new(resolution);
+        self.ambient_occlusion.resize(resolution);
+    }
+
     pub fn new(resolution: (u32, u32)) -> Self {
         let depth_prepass_source =
             ShaderSource::load_from_file(std::path::Path::new("assets/shaders/depth_prepass_shader.glsl"));
 
-        let render_targets = RenderTargets::new(resolution.0, resolution.1);
+        let render_targets = RenderTargets::new(resolution);
 
-        let ao = ambient_occlusion::AmbientOcclusion::new(resolution.0, resolution.1);
+        let (ao_resolution_x, ao_resolution_y) = Renderer::calculate_ssao_resolution(resolution);
+
+        let ao = ambient_occlusion::AmbientOcclusion::new(ao_resolution_x, ao_resolution_y);
         ao.set_input_textures(&render_targets.depth_texture, &render_targets.normal_texture);
 
         let fs_quad = graphics::fullscreen_quad::FullscreenQuad::new(std::path::Path::new(
@@ -401,13 +414,28 @@ impl RenderTargets {
             .set_color_texture_render_target(self.normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        let (color_texture, depth_texture, normal_texture) = RenderTargets::create_texture_set(width, height);
-        self.attach_textures(color_texture, depth_texture, normal_texture);
+    pub fn resize(&mut self, resolution: (u32, u32)) {
+        println!("Resize called");
+
+        let (color_texture, depth_texture, normal_texture) =
+            RenderTargets::create_texture_set(resolution.0, resolution.1);
+        // self.attach_textures(color_texture, depth_texture, normal_texture);
+
+        self.color_texture = color_texture;
+        self.depth_texture = depth_texture;
+        self.normal_texture = normal_texture;
+
+        self.framebuffer
+            .set_depth_texture_render_target(self.depth_texture.id(), self.depth_texture.storage_format());
+        self.framebuffer
+            .set_color_texture_render_target(self.color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
+        self.framebuffer
+            .set_color_texture_render_target(self.normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
     }
 
-    pub fn new(width: u32, height: u32) -> Self {
-        let (color_texture, depth_texture, normal_texture) = RenderTargets::create_texture_set(width, height);
+    pub fn new(resolution: (u32, u32)) -> Self {
+        let (color_texture, depth_texture, normal_texture) =
+            RenderTargets::create_texture_set(resolution.0, resolution.1);
 
         let mut framebuffer = Framebuffer::new();
 

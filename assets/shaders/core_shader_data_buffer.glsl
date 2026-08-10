@@ -1,16 +1,19 @@
 #ifndef GLOBAL_DATA_BUFFER_INCLUDED
 #define GLOBAL_DATA_BUFFER_INCLUDED
 layout(std430, binding = 0) buffer shared_data_buffer {
-    mat4  camera_vp_matrix;
-    mat4  camera_view_matrix;
-    mat4  camera_projection_matrix;
-    mat4  camera_inverse_projection_matrix;
-    vec4  camera_position;
-    vec4  camera_forward;
-    uvec4 screen_size;
+    mat4 camera_vp_matrix;
+    mat4 camera_view_matrix;
+    mat4 camera_projection_matrix;
+    mat4 camera_inverse_projection_matrix;
+    vec4 camera_position;
+    vec4 camera_forward;
+    vec2 screen_size;
+    vec2 camera_planes;
 } shared_data;
 
 #define CORE_SCREEN_SIZE (shared_data.screen_size.xy)
+#define CORE_CAMERA_ZFAR (shared_data.camera_planes.y)
+#define CORE_CAMERA_ZNEAR (shared_data.camera_planes.x)
 #define CORE_CAMERA_POSITION (shared_data.camera_position.xyz)
 #define CORE_CAMERA_VP_MATRIX (shared_data.camera_vp_matrix)
 #define CORE_CAMERA_VIEW_MATRIX (shared_data.camera_view_matrix)

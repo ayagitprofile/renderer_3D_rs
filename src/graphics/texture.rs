@@ -1,7 +1,7 @@
 use crate::gl;
 use stb_image::stb_image;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum FilteringMode {
     Nearest,
     Bilinear,
@@ -9,6 +9,7 @@ pub enum FilteringMode {
     AnisotropicX16,
 }
 
+#[derive(PartialEq, Clone, Copy)]
 pub enum WrappingMode {
     Repeat,
     Clamp,

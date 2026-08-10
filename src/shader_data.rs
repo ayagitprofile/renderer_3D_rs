@@ -1,4 +1,4 @@
-use glam::{Mat4, UVec4, Vec4, uvec4, vec4};
+use glam::{Mat4, UVec4, Vec2, Vec4, uvec4, vec2, vec4};
 
 use crate::{graphics, transform::Transform};
 
@@ -11,7 +11,8 @@ struct GPUSideData {
     camera_inverse_projection_matrix: Mat4,
     camera_position: Vec4,
     camera_forward: Vec4,
-    screen_size: UVec4,
+    screen_size: Vec2,
+    camera_panes: Vec2,
 }
 
 impl GPUSideData {
@@ -36,7 +37,7 @@ impl GlobalShaderData {
     }
 
     pub fn set_screen_size(&mut self, width: u32, height: u32) {
-        self.gpu_side_data.screen_size = uvec4(width, height, 0, 0);
+        self.gpu_side_data.screen_size = vec2(width as f32, height as f32);
     }
 
     fn set_camera_matrices(&mut self, view_matrix: &Mat4, projection_matrix: &Mat4) {
@@ -47,7 +48,13 @@ impl GlobalShaderData {
             self.gpu_side_data.camera_projection_matrix * self.gpu_side_data.camera_view_matrix;
     }
 
-    pub fn set_camera_data(&mut self, view_matrix: &Mat4, projection_matrix: &Mat4, camera_transform: &Transform) {
+    pub fn set_camera_data(
+        &mut self,
+        view_matrix: &Mat4,
+        projection_matrix: &Mat4,
+        camera_transform: &Transform,
+        clip_range: [f32; 2],
+    ) {
         self.set_camera_matrices(view_matrix, projection_matrix);
 
         let position = camera_transform.position();
@@ -57,6 +64,8 @@ impl GlobalShaderData {
         let forward = camera_transform.forward();
 
         self.gpu_side_data.camera_forward = vec4(forward.x, forward.y, forward.z, 0f32);
+
+        self.gpu_side_data.camera_panes = Vec2::from_array(clip_range);
     }
 
     pub fn new() -> Self {
@@ -69,7 +78,8 @@ impl GlobalShaderData {
             camera_inverse_projection_matrix: Mat4::IDENTITY,
             camera_forward: Vec4::ZERO,
             camera_position: Vec4::ZERO,
-            screen_size: UVec4::ZERO,
+            screen_size: Vec2::ZERO,
+            camera_panes: Vec2::ZERO,
         };
 
         buffer.allocate(data.as_slice(), graphics::buffer::Usage::Dynamic);

@@ -19,8 +19,7 @@ uniform sampler2D fb_depth_texture;
 uniform sampler2D fb_normal_texture;
 uniform sampler2D random_direction_texture;
 
-// Must match the image unit used by glBindImageTexture().
-layout(binding = 0, r8) uniform writeonly image2D out_ao_texture_image;
+layout(binding = 0, r16f) uniform writeonly image2D out_ao_texture_image;
 
 vec3 reconstruct_position_vs(vec2 uv, float depth)
 {
@@ -71,17 +70,20 @@ void main()
 {
     const ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.xy);
 
-    const ivec2 image_size = imageSize(out_ao_texture_image);
+    const ivec2 output_image_size = imageSize(out_ao_texture_image);
 
     // prevent overruning image buffer
-    if (any(greaterThanEqual(pixel_coord, image_size)))
+    if (any(greaterThanEqual(pixel_coord, output_image_size)))
         return;
+
+    const ivec2 normal_texture_size = textureSize(fb_normal_texture, 0);
+    const ivec2 depth_texture_size = textureSize(fb_depth_texture, 0);
 
     const uint kernel_sample_count = kernel_buffer.samples.length();
 
-    const vec2 uv = (vec2(pixel_coord) + 0.5) / vec2(CORE_SCREEN_SIZE);
+    const vec2 ao_uv = (vec2(pixel_coord) + 0.5) / vec2(output_image_size);
 
-    const float depth = texelFetch(fb_depth_texture, pixel_coord, 0).r;
+    const float depth = textureLod(fb_depth_texture, ao_uv, 0).r;
 
     // Background.
     if (depth >= 0.9999)
@@ -97,16 +99,15 @@ void main()
 
     // Reconstruct position in VIEW SPACE
 
-    const vec3 position_vs =
-        reconstruct_position_vs(uv, depth);
+    const vec3 position_vs = reconstruct_position_vs(ao_uv, depth);
 
     // World-space normal from normal texture to view-space normal
 
     const vec3 normal_ws =
         normal_oct_decode(
-            texelFetch(
+            textureLod(
                 fb_normal_texture,
-                pixel_coord,
+                ao_uv,
                 0
             ).xy
         );
@@ -119,9 +120,9 @@ void main()
 
     // Random tangent direction
     const float random_dir_texture_width = 8.0;
-    const vec2 noise_uv = fract(uv * vec2(CORE_SCREEN_SIZE) / random_dir_texture_width);
+    const vec2 noise_uv = fract(ao_uv * vec2(output_image_size) / random_dir_texture_width);
 
-    // Assuming input data is in [-1..1] range
+    // Assuming input data is in [-1..1] range, no remapping
     const vec3 random_vec = texture(random_direction_texture, noise_uv).xyz;
 
     // TBN in VIEW SPACE
@@ -130,9 +131,6 @@ void main()
             normal_vs,
             random_vec
         );
-
-    // const float ao_radius = 0.2;
-    // const float ao_depth_bias = 0.01;
 
     float occlusion = 0.0;
 
@@ -171,16 +169,10 @@ void main()
 
         // Read depth at projected sample location
 
-        const ivec2 sample_pixel =
-            ivec2(
-                sample_uv *
-                vec2(CORE_SCREEN_SIZE)
-            );
-
         const float scene_depth =
-            texelFetch(
+            textureLod(
                 fb_depth_texture,
-                sample_pixel,
+                sample_uv,
                 0
             ).r;
 
@@ -211,7 +203,7 @@ void main()
 
         if (depth_difference > ao_config.depth_bias)
         {
-#if 0
+#if 1
             float sample_distance = length(sample_position_vs - position_vs);
 
             float scene_distance = length(scene_position_vs - position_vs);
@@ -227,12 +219,10 @@ void main()
 #endif
 
             occlusion += range_weight;
-            // occlusion += range_weight * normal_weight;
         }
     }
 
     // Normalize
-
     occlusion /= float(kernel_sample_count);
 
     const float ao_value = 1.0 - clamp(occlusion * ao_config.strength, 0.0, 1.0);
@@ -244,7 +234,7 @@ void main()
             ao_value,
             0.0,
             0.0,
-            1.0
+            0.0
         )
     );
 }

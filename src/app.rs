@@ -8,8 +8,8 @@ use imgui::TreeNodeFlags;
 use sdl2::{event::Event, keyboard::Keycode, video::GLProfile};
 
 use crate::{
-    ambient_occlusion, camera, camera_controller, gl,
-    graphics::{self, texture::Texture},
+    camera, camera_controller, gl,
+    graphics::{self},
     input,
     scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene::Scene},
     shader_data,
@@ -93,6 +93,7 @@ impl App {
                         sdl2::event::WindowEvent::Resized(..) => {
                             resize_viewport(&self.sdl_window);
                             self.camera.aspect_ratio = get_window_aspect_ratio(&self.sdl_window);
+                            scene_renderer = scene::renderer::Renderer::new(self.sdl_window.size())
                         }
                         _ => {}
                     },
@@ -115,24 +116,26 @@ impl App {
                 camera_controller.ignore_input = false;
             }
 
-            // for i in 0..scene.root_nodes().len() {
-            //     let node = scene.get_node_mut(scene.root_nodes()[i]);
+            if false {
+                for i in 0..scene.root_nodes().len() {
+                    let node = scene.get_node_mut(scene.root_nodes()[i]);
 
-            //     if node.transform.position().y < 0f32 {
-            //         continue;
-            //     }
+                    if node.transform.position().y < 0.25f32 {
+                        continue;
+                    }
 
-            //     let time = std::time::Instant::now()
-            //         .duration_since(self.time_on_app_startup)
-            //         .as_secs_f32();
+                    let time = std::time::Instant::now()
+                        .duration_since(self.time_on_app_startup)
+                        .as_secs_f32();
 
-            //     let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
+                    let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
 
-            //     let rotation = glam::Quat::from_axis_angle(Transform::UP, time);
+                    let rotation = glam::Quat::from_axis_angle(Transform::UP, time);
 
-            //     node.transform =
-            //         Transform::from_model_matrix(glam::Mat4::from_scale_rotation_translation(s, rotation, t));
-            // }
+                    node.transform =
+                        Transform::from_model_matrix(glam::Mat4::from_scale_rotation_translation(s, rotation, t));
+                }
+            }
 
             camera_controller.update(&mut self.camera, delta_time, input);
 
@@ -142,6 +145,7 @@ impl App {
                 &self.camera.view_matrix(),
                 &self.camera.projection_matrix(),
                 &self.camera.transform,
+                self.camera.clipping_range,
             );
 
             shader_data.upload_data();
@@ -172,7 +176,15 @@ impl App {
                 .title_bar(false)
                 .position([0f32, 0f32], imgui::Condition::Always)
                 .build(|| {
-                    ui.text(format!("FPS: {}", (1f32 / delta_time) as i32));
+                    if ui.collapsing_header("Rendering stats", TreeNodeFlags::DEFAULT_OPEN) {
+                        ui.text(format!(
+                            "Resolution: ({} by {})",
+                            self.sdl_window.size().0,
+                            self.sdl_window.size().1
+                        ));
+                        ui.text(format!("FPS: {}", (1f32 / delta_time) as i32));
+                        ui.text(format!("Frame time: {:.2} ms", delta_time * 1000f32));
+                    }
                     if ui.collapsing_header("Camera", TreeNodeFlags::DEFAULT_OPEN) {
                         let pos = vec3_to_string(self.camera.transform.position());
                         let fwd = vec3_to_string(self.camera.transform.forward());
@@ -184,17 +196,34 @@ impl App {
                         ui.text(format!("Visible objects: {}", rendering_stats.visible_objects));
                     }
                     if ui.collapsing_header("SSAO", TreeNodeFlags::DEFAULT_OPEN) {
-                        let mut r = scene_renderer.ssao().radius();
+                        let (rx, ry) = (
+                            scene_renderer.ssao().ao_compute_result_texture().width(),
+                            scene_renderer.ssao().ao_compute_result_texture().height(),
+                        );
+
+                        let ratio = (rx * ry) as f32 / (self.sdl_window.size().0 * self.sdl_window.size().1) as f32;
+
+                        ui.text(format!("Resolution: ({} by {})", rx, ry));
+
+                        ui.text(format!("Ratio to screen size: {:.2}", ratio));
+
+                        let ssao = scene_renderer.ssao_mut();
+
+                        let mut blur = *ssao.enable_blur_pass();
+                        if ui.checkbox("Enable blur pass", &mut blur) {
+                            *ssao.enable_blur_pass() = blur;
+                        }
+                        let mut r = ssao.radius();
                         if ui.slider("Radius", 0f32, 1f32, &mut r) {
-                            scene_renderer.ssao_mut().set_radius(r);
+                            ssao.set_radius(r);
                         }
-                        let mut db = scene_renderer.ssao().depth_bias();
+                        let mut db = ssao.depth_bias();
                         if ui.slider("Depth bias", 0f32, 0.1f32, &mut db) {
-                            scene_renderer.ssao_mut().set_depth_bias(db);
+                            ssao.set_depth_bias(db);
                         }
-                        let mut s = scene_renderer.ssao().strength();
+                        let mut s = ssao.strength();
                         if ui.slider("Strength", 0f32, 10f32, &mut s) {
-                            scene_renderer.ssao_mut().set_strength(s);
+                            ssao.set_strength(s);
                         }
                     }
                 });
@@ -319,6 +348,8 @@ fn vec3_to_string(value: glam::Vec3) -> String {
 
 fn resize_viewport(window: &sdl2::video::Window) {
     let (width, height) = (window.size().0 as i32, window.size().1 as i32);
+
+    graphics::framebuffer::bind_default_framebuffer();
 
     unsafe {
         gl::Viewport(0, 0, width, height);

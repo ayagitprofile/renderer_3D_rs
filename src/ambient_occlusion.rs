@@ -7,7 +7,7 @@ use crate::{
         self,
         buffer::GraphicsBuffer,
         shader::{self, ComputeShader},
-        texture::{self, Texture},
+        texture::{self, StorageFormat, Texture},
     },
     scene,
     shader_source::ShaderSource,
@@ -22,7 +22,7 @@ const COMPUTE_SHADER_KERNEL_DATA_BUFFER_BINDING: u32 = scene::buffers::SHADER_FR
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct SSAOComputeUniformData {
+struct SSAOComputeUniformData {
     pub radius: f32,
     pub depth_bias: f32,
     pub strength: f32,
@@ -30,6 +30,10 @@ pub struct SSAOComputeUniformData {
 
 pub struct AmbientOcclusion {
     ao_compute_shader: ComputeShader,
+    ao_blur_compute_shader: ComputeShader,
+
+    ao_compute_stage_texture: texture::Texture2D,
+
     output_texture: texture::Texture2D,
 
     _random_directions_texture: texture::Texture2D,
@@ -37,6 +41,8 @@ pub struct AmbientOcclusion {
 
     uniform_data: SSAOComputeUniformData,
     uniform_data_buffer: GraphicsBuffer,
+
+    enable_blur_pass: bool,
 }
 
 impl AmbientOcclusion {
@@ -45,6 +51,12 @@ impl AmbientOcclusion {
     }
 
     pub fn set_input_textures(&self, depth_texture: &texture::Texture2D, normal_texture: &texture::Texture2D) {
+        graphics::utility::try_set_bindless_texture(
+            self.ao_blur_compute_shader.underlying_shader(),
+            scene::textures::FRAMEBUFFER_DEPTH_TEXTURE,
+            depth_texture.bindless_handle(),
+        );
+
         graphics::utility::try_set_bindless_texture(
             self.ao_compute_shader.underlying_shader(),
             scene::textures::FRAMEBUFFER_DEPTH_TEXTURE,
@@ -59,24 +71,20 @@ impl AmbientOcclusion {
     }
 
     pub fn compute_ambient_occlusion(&self) {
+        if self.uniform_data.strength < 0.01 {
+            self.output_texture.clear([1f32; 4]);
+            return;
+        }
+
         let uniform_data = SSAOComputeUniformData {
             radius: self.uniform_data.radius.clamp(0f32, 100f32),
             depth_bias: self.uniform_data.depth_bias.clamp(0f32, 1f32),
             strength: self.uniform_data.strength.clamp(0f32, 10f32),
         };
 
-        if self.uniform_data.strength < 0.01 {
-            self.output_texture.clear([1f32; 4]);
-            return;
-        }
-
         self.uniform_data_buffer
             .set_binding(graphics::buffer::BindingTarget::UniformBuffer, 0);
         self.uniform_data_buffer.upload_data(&[uniform_data]);
-
-        unsafe {
-            gl::BindImageTexture(0, self.output_texture.id(), 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::R16F);
-        }
 
         const COMPUTE_THREADS_PER_WORK_GROUP_X: u32 = 16;
         const COMPUTE_THREADS_PER_WORK_GROUP_Y: u32 = 16;
@@ -88,11 +96,83 @@ impl AmbientOcclusion {
             (texture_height + COMPUTE_THREADS_PER_WORK_GROUP_Y - 1) / COMPUTE_THREADS_PER_WORK_GROUP_Y,
         );
 
-        self.ao_compute_shader.dispatch(
-            work_groups_x,
-            work_groups_y,
-            Some(shader::ComputeMemoryBarrier::TextureFetch),
-        );
+        if self.enable_blur_pass == false {
+            unsafe {
+                gl::BindImageTexture(0, self.output_texture.id(), 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::R16F);
+            }
+
+            self.ao_compute_shader.dispatch(
+                work_groups_x,
+                work_groups_y,
+                Some(shader::ComputeMemoryBarrier::TextureFetch),
+            );
+
+            return;
+        }
+
+        // ao calculation pass
+        {
+            unsafe {
+                gl::BindImageTexture(
+                    0,
+                    self.ao_compute_stage_texture.id(),
+                    0,
+                    gl::FALSE,
+                    0,
+                    gl::WRITE_ONLY,
+                    gl::R16F,
+                );
+            }
+
+            self.ao_compute_shader.dispatch(
+                work_groups_x,
+                work_groups_y,
+                Some(shader::ComputeMemoryBarrier::ImageAccess),
+            );
+        }
+
+        let direction_uniform_location = self
+            .ao_blur_compute_shader
+            .underlying_shader()
+            .find_uniform_location("u_horizontal")
+            .unwrap();
+
+        // ao blur pass
+        {
+            unsafe {
+                gl::BindImageTexture(
+                    0,
+                    self.ao_compute_stage_texture.id(),
+                    0,
+                    gl::FALSE,
+                    0,
+                    gl::READ_ONLY,
+                    gl::R16F,
+                );
+
+                gl::BindImageTexture(1, self.output_texture.id(), 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::R16F);
+            }
+
+            self.ao_blur_compute_shader
+                .underlying_shader()
+                .set_uniform_u32(direction_uniform_location, 1);
+
+            self.ao_blur_compute_shader.dispatch(
+                work_groups_x,
+                work_groups_y,
+                Some(shader::ComputeMemoryBarrier::ImageAccess),
+            );
+
+            self.ao_blur_compute_shader
+                .underlying_shader()
+                .set_uniform_u32(direction_uniform_location, 0);
+
+            self.ao_blur_compute_shader.dispatch(
+                work_groups_x,
+                work_groups_y,
+                Some(shader::ComputeMemoryBarrier::TextureFetch),
+            );
+        }
     }
 
     pub fn set_radius(&mut self, radius: f32) {
@@ -119,21 +199,36 @@ impl AmbientOcclusion {
         self.uniform_data.strength
     }
 
-    pub fn new(texture_width: u32, texture_height: u32) -> Self {
-        let _timer = timer::ScopedTimer::start("Creating SSAO data");
-
+    pub fn resize(&mut self, resolution: (u32, u32)) {
         let output_texture = texture::Texture2D::create_texture(
-            texture_width as i32,
-            texture_height as i32,
+            resolution.0 as i32,
+            resolution.1 as i32,
             texture::StorageFormat::R16F,
             texture::FilteringMode::Nearest,
             texture::WrappingMode::Clamp,
             false,
         );
 
-        let ao_compute_shader =
-            ShaderSource::load_from_file(std::path::Path::new("assets/shaders/ao_compute_shader.glsl"))
-                .compile_compute();
+        self.output_texture = output_texture;
+    }
+
+    pub fn enable_blur_pass(&mut self) -> &mut bool {
+        &mut self.enable_blur_pass
+    }
+
+    pub fn new(texture_width: u32, texture_height: u32) -> Self {
+        let mut timer = timer::Timer::start("");
+
+        let ao_source = ShaderSource::load_from_file(std::path::Path::new("assets/shaders/ao_compute_shader.glsl"));
+
+        println!("SSAO compute loading took: {} ms", timer.reset().as_millis());
+
+        let ao_compute_shader = ao_source.compile_compute();
+
+        println!("SSAO compute compilation took: {} ms", timer.reset().as_millis());
+
+        let ao_blur_shader =
+            ShaderSource::load_from_file(std::path::Path::new("assets/shaders/ao_blur_shader.glsl")).compile_compute();
 
         const SAMPLE_COUNT: usize = RANDOM_DIRECTION_TEXTURE_WIDTH * RANDOM_DIRECTION_TEXTURE_WIDTH;
 
@@ -174,20 +269,52 @@ impl AmbientOcclusion {
 
         let uniform_data = SSAOComputeUniformData {
             radius: 0.2f32,
-            depth_bias: 0.01f32,
+            depth_bias: 0.02f32,
             strength: 1f32,
         };
 
         let mut uniform_data_buffer = GraphicsBuffer::new();
         uniform_data_buffer.allocate(&[uniform_data], graphics::buffer::Usage::Dynamic);
 
+        let (format, filtering, wrapping, generate_mip_maps) = (
+            StorageFormat::R16F,
+            texture::FilteringMode::Nearest,
+            texture::WrappingMode::Clamp,
+            false,
+        );
+
+        let ao_compute_stage_texture = texture::Texture2D::create_texture(
+            texture_width as i32,
+            texture_height as i32,
+            format,
+            filtering,
+            wrapping,
+            generate_mip_maps,
+        );
+
+        let output_texture = texture::Texture2D::create_texture(
+            texture_width as i32,
+            texture_height as i32,
+            format,
+            filtering,
+            wrapping,
+            generate_mip_maps,
+        );
+
         Self {
             ao_compute_shader,
+            ao_blur_compute_shader: ao_blur_shader,
+
             _random_directions_texture: random_direction_texture,
             _kernel_samples_buffer: kernel_samples_buffer,
-            output_texture,
+
+            output_texture: output_texture,
+            ao_compute_stage_texture: ao_compute_stage_texture,
+
             uniform_data,
             uniform_data_buffer,
+
+            enable_blur_pass: true,
         }
     }
 
