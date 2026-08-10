@@ -22,6 +22,8 @@ rustc-ice-*.txt
 
 /assets/textures/cubemap
 
+!/assets/debug/
+
 !/assets/shaders/
 !/assets/shaders/**
 

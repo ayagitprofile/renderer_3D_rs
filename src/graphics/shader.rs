@@ -128,6 +128,12 @@ impl Shader {
         }
     }
 
+    pub fn set_uniform_vec4(&self, location: i32, value: &[f32; 4]) {
+        unsafe {
+            gl::ProgramUniform4f(self.id, location, value[0], value[1], value[2], value[3]);
+        }
+    }
+
     fn load_uniform_data(id: u32) -> UniformDataStorage {
         let mut storage = UniformDataStorage::new();
 

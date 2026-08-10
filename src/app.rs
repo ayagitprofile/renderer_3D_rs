@@ -1,6 +1,6 @@
 use std::sync::{Mutex, OnceLock};
 
-use glam::Vec3;
+use glam::{Vec3, vec3};
 use imgui::TreeNodeFlags;
 use sdl2::{
     event::Event,
@@ -9,10 +9,17 @@ use sdl2::{
 };
 
 use crate::{
-    camera, camera_controller, gl,
+    camera, camera_controller,
+    debug_gizmos::DebugGizmoRenderer,
+    gl,
     graphics::{self},
     input,
-    scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene_controller::SceneController},
+    scene::{
+        self,
+        light::{LightData, LightType},
+        light_data_buffer::LightDataBuffer,
+        scene_controller::SceneController,
+    },
     shader_data,
     transform::Transform,
 };
@@ -23,12 +30,11 @@ impl App {
     pub fn run(&mut self) {
         let mut shader_data = shader_data::GlobalShaderData::new();
 
-        let _light_data = LightDataBuffer::new(&[
-            LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 1.9f32)
-                .to_gpu_data(),
-            LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 3f32, 10f32).to_gpu_data(),
-            LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 3f32, 10f32).to_gpu_data(),
-            LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 3f32, 10f32).to_gpu_data(),
+        let light_data = LightDataBuffer::new(&[
+            LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 1.9f32),
+            LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 3f32, 10f32),
+            LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 3f32, 10f32),
+            LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 3f32, 10f32),
         ]);
 
         self.camera
@@ -44,6 +50,8 @@ impl App {
         let mut scene_renderer = scene::renderer::Renderer::new((window_size_x as u32, window_size_y as u32));
 
         let mut draw_ui = true;
+
+        let gizmo_renderer = DebugGizmoRenderer::new();
 
         'main_loop: loop {
             if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
@@ -160,6 +168,20 @@ impl App {
             scene_renderer.render_forward_lighting(scene);
 
             scene_renderer.render_post_processing();
+
+            for light in light_data.lights() {
+                match light.type_of_light {
+                    LightType::Directional => {}
+                    LightType::Point => {
+                        gizmo_renderer.render_lightbulb(
+                            Vec3::from_array(light.position),
+                            vec3(0.3, 0.3, 0.3),
+                            Vec3::from_array(light.color),
+                        );
+                    }
+                    LightType::Spot => {}
+                }
+            }
 
             self.imgui_sdl_platform
                 .prepare_frame(&mut self.imgui_context, &self.sdl_window, &self.sdl_event_pump);

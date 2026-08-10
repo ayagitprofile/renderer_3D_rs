@@ -18,23 +18,24 @@ pub struct GPULightData {
     pub spot_light_data: [f32; 4], // x = inner cone cos, y = outer cone cos
 }
 
+#[derive(Clone, Copy)]
 #[rustfmt::skip]
 pub struct LightData {
-    type_of_light: LightType,
+    pub type_of_light: LightType,
 
-    position: [f32; 3],
-    direction: [f32; 3],
+    pub position: [f32; 3],
+    pub direction: [f32; 3],
 
-    color: [f32; 3],
-    color_intensity: f32,
+    pub color: [f32; 3],
+    pub color_intensity: f32,
 
-    constant_attenuation: f32,
-    linear_attenuation: f32,
-    quadratic_attenuation: f32,
-    attenuation_range: f32,
+    pub constant_attenuation: f32,
+    pub linear_attenuation: f32,
+    pub quadratic_attenuation: f32,
+    pub attenuation_range: f32,
 
-    spot_light_inner_cone_cos: f32,
-    spot_light_outer_cone_cos: f32,
+    pub spot_light_inner_cone_cos: f32,
+    pub spot_light_outer_cone_cos: f32,
 }
 
 impl LightData {

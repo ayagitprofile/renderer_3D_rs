@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    f32::consts::E,
-};
+use std::collections::{HashMap, HashSet};
 
 use glam::Mat4;
 use gltf::material::AlphaMode;

@@ -1,15 +1,22 @@
-use crate::graphics::buffer::GraphicsBuffer;
+use crate::{graphics::buffer::GraphicsBuffer, scene::light::LightData};
 
 const BUFFER_HEADER_SIZE: usize = size_of::<[u32; 4]>();
 const LIGHT_DATA_SIZE: usize = size_of::<super::light::GPULightData>();
 
 pub struct LightDataBuffer {
     data: Vec<u8>,
+    lights: Vec<super::light::LightData>,
     gpu_buffer: GraphicsBuffer,
 }
 
 impl LightDataBuffer {
-    pub fn new(data: &[super::light::GPULightData]) -> Self {
+    pub fn lights(&self) -> &[LightData] {
+        &self.lights
+    }
+
+    pub fn new(light_data: &[super::light::LightData]) -> Self {
+        let data: Vec<super::light::GPULightData> = light_data.iter().map(|e| e.to_gpu_data()).collect();
+
         let header = [data.len() as u32, 0, 0, 0];
 
         let buffer_byte_size = BUFFER_HEADER_SIZE + LIGHT_DATA_SIZE * data.len();
@@ -34,6 +41,7 @@ impl LightDataBuffer {
         );
 
         Self {
+            lights: light_data.to_vec(),
             gpu_buffer: gpu_buffer,
             data: buffer,
         }

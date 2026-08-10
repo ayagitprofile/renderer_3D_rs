@@ -40,6 +40,7 @@ pub struct RenderTargets {
 
 struct DrawCallData {
     object_to_world: Mat4,
+    world_center: Vec3,
     node_id: data::NodeID,
 }
 
@@ -123,15 +124,17 @@ impl CameraFrustum {
 }
 
 impl DrawCallData {
-    fn new(node_id: data::NodeID, object_to_world: &Mat4) -> Self {
+    fn new(node_id: data::NodeID, object_to_world: &Mat4, world_center: Vec3) -> Self {
         Self {
             node_id,
             object_to_world: *object_to_world,
+            world_center,
         }
     }
 }
 
-fn transform_aabb(aabb: AABBVec3, world: &Mat4) -> AABBVec3 {
+/// transform AABB, and get world center for sorting
+fn transform_aabb(aabb: AABBVec3, world: &Mat4) -> (AABBVec3, Vec3) {
     let center = (aabb.min + aabb.max) * 0.5;
     let extent = (aabb.max - aabb.min) * 0.5;
 
@@ -139,10 +142,13 @@ fn transform_aabb(aabb: AABBVec3, world: &Mat4) -> AABBVec3 {
 
     let world_extent = Mat3::from_mat4(*world).abs() * extent;
 
-    AABBVec3 {
-        min: world_center - world_extent,
-        max: world_center + world_extent,
-    }
+    (
+        AABBVec3 {
+            min: world_center - world_extent,
+            max: world_center + world_extent,
+        },
+        world_center,
+    )
 }
 
 impl Renderer {
@@ -164,17 +170,20 @@ impl Renderer {
 
             let object_to_world = *root_node.transform.model_matrix();
 
-            let aabb = transform_aabb(AABBVec3::from_scene_aabb(&root_node.bounding_box), &object_to_world);
+            let (aabb, center) = transform_aabb(AABBVec3::from_scene_aabb(&root_node.bounding_box), &object_to_world);
 
             let material = scene.get_material(root_node.material_id);
 
             if camera_frustum.intersects_aabb(&aabb) {
                 if material.material_properties.surface_type == SurfaceType::Opaque {
                     self.opaque_object_draw_call_data
-                        .push(DrawCallData::new(*root_node_id, &object_to_world));
+                        .push(DrawCallData::new(*root_node_id, &object_to_world, center));
                 } else {
-                    self.transparent_object_draw_call_data
-                        .push(DrawCallData::new(*root_node_id, &object_to_world));
+                    self.transparent_object_draw_call_data.push(DrawCallData::new(
+                        *root_node_id,
+                        &object_to_world,
+                        center,
+                    ));
                 }
             }
 
@@ -184,7 +193,7 @@ impl Renderer {
                 let child_node = scene.get_node(*child_id);
                 let child_object_to_world = root_node.transform.model_matrix() * child_node.transform.model_matrix();
 
-                let child_aabb = transform_aabb(
+                let (child_aabb, child_center) = transform_aabb(
                     AABBVec3::from_scene_aabb(&child_node.bounding_box),
                     &child_object_to_world,
                 );
@@ -192,11 +201,17 @@ impl Renderer {
                 if camera_frustum.intersects_aabb(&child_aabb) {
                     let child_material = scene.get_material(child_node.material_id);
                     if child_material.material_properties.surface_type == SurfaceType::Opaque {
-                        self.opaque_object_draw_call_data
-                            .push(DrawCallData::new(*child_id, &child_object_to_world));
+                        self.opaque_object_draw_call_data.push(DrawCallData::new(
+                            *child_id,
+                            &child_object_to_world,
+                            child_center,
+                        ));
                     } else {
-                        self.transparent_object_draw_call_data
-                            .push(DrawCallData::new(*child_id, &child_object_to_world));
+                        self.transparent_object_draw_call_data.push(DrawCallData::new(
+                            *child_id,
+                            &child_object_to_world,
+                            child_center,
+                        ));
                     }
                 }
             }
@@ -205,20 +220,20 @@ impl Renderer {
         let camera_position = camera.transform.position();
 
         self.opaque_object_draw_call_data.sort_by(|a, b| {
-            let a_position = a.object_to_world.w_axis.truncate();
+            let a_position = a.world_center;
             let a_distance_to_camera = camera_position.distance_squared(a_position);
 
-            let b_position = b.object_to_world.w_axis.truncate();
+            let b_position = b.world_center;
             let b_distance_to_camera = camera_position.distance_squared(b_position);
 
             a_distance_to_camera.total_cmp(&b_distance_to_camera)
         });
 
         self.transparent_object_draw_call_data.sort_by(|b, a| {
-            let a_position = a.object_to_world.w_axis.truncate();
+            let a_position = a.world_center;
             let a_distance_to_camera = camera_position.distance_squared(a_position);
 
-            let b_position = b.object_to_world.w_axis.truncate();
+            let b_position = b.world_center;
             let b_distance_to_camera = camera_position.distance_squared(b_position);
 
             a_distance_to_camera.total_cmp(&b_distance_to_camera)
