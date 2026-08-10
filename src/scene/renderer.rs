@@ -1,22 +1,25 @@
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat3, Mat4, Vec3, Vec4};
 
 use super::{data, scene::Scene};
 use crate::ambient_occlusion::AmbientOcclusion;
 use crate::camera::Camera;
 use crate::graphics::framebuffer::Framebuffer;
-use crate::graphics::material_properties::MaterialProperties;
+use crate::graphics::material_properties::{MaterialProperties, SurfaceType};
 use crate::graphics::mesh::Mesh;
 use crate::graphics::shader::Shader;
 use crate::graphics::texture::{self, Texture};
 use crate::scene::skybox::Skybox;
 use crate::shader_source::ShaderSource;
-use crate::{ambient_occlusion, gl, graphics};
+use crate::{ambient_occlusion, gl, graphics, timer};
 
 const SHADER_MODEL_MATRIX_UNIFORM_NAME: &str = "u_model_matrix";
 
 pub struct Renderer {
     current_mat_props: MaterialProperties,
-    draw_call_data: Vec<DrawCallData>,
+
+    opaque_object_draw_call_data: Vec<DrawCallData>,
+    transparent_object_draw_call_data: Vec<DrawCallData>,
+
     depth_prepass_shader: (Shader, MaterialProperties),
     skybox: Skybox,
 
@@ -70,6 +73,7 @@ struct CameraFrustum {
 pub struct RenderingStats {
     pub total_objects: u32,
     pub visible_objects: u32,
+    pub frame_data_preparation_time: std::time::Duration,
 }
 
 impl Plane {
@@ -119,17 +123,34 @@ impl CameraFrustum {
 }
 
 impl DrawCallData {
-    fn new(node_id: data::NodeID, object_to_world: Mat4) -> Self {
+    fn new(node_id: data::NodeID, object_to_world: &Mat4) -> Self {
         Self {
             node_id,
-            object_to_world,
+            object_to_world: *object_to_world,
         }
+    }
+}
+
+fn transform_aabb(aabb: AABBVec3, world: &Mat4) -> AABBVec3 {
+    let center = (aabb.min + aabb.max) * 0.5;
+    let extent = (aabb.max - aabb.min) * 0.5;
+
+    let world_center = world.transform_point3(center);
+
+    let world_extent = Mat3::from_mat4(*world).abs() * extent;
+
+    AABBVec3 {
+        min: world_center - world_extent,
+        max: world_center + world_extent,
     }
 }
 
 impl Renderer {
     pub fn prepare_rendering_data(&mut self, scene: &Scene, camera: &Camera) -> RenderingStats {
-        self.draw_call_data.clear();
+        let timer = timer::Timer::start("");
+
+        self.opaque_object_draw_call_data.clear();
+        self.transparent_object_draw_call_data.clear();
 
         let camera_frustum =
             CameraFrustum::from_view_projection_matrix(camera.projection_matrix() * camera.view_matrix());
@@ -143,15 +164,18 @@ impl Renderer {
 
             let object_to_world = *root_node.transform.model_matrix();
 
-            let position = object_to_world.w_axis.truncate();
+            let aabb = transform_aabb(AABBVec3::from_scene_aabb(&root_node.bounding_box), &object_to_world);
 
-            let mut aabb = AABBVec3::from_scene_aabb(&root_node.bounding_box);
-            aabb.max += position;
-            aabb.min += position;
+            let material = scene.get_material(root_node.material_id);
 
             if camera_frustum.intersects_aabb(&aabb) {
-                self.draw_call_data
-                    .push(DrawCallData::new(*root_node_id, object_to_world));
+                if material.material_properties.surface_type == SurfaceType::Opaque {
+                    self.opaque_object_draw_call_data
+                        .push(DrawCallData::new(*root_node_id, &object_to_world));
+                } else {
+                    self.transparent_object_draw_call_data
+                        .push(DrawCallData::new(*root_node_id, &object_to_world));
+                }
             }
 
             for child_id in root_node.children_iter() {
@@ -160,31 +184,50 @@ impl Renderer {
                 let child_node = scene.get_node(*child_id);
                 let child_object_to_world = root_node.transform.model_matrix() * child_node.transform.model_matrix();
 
-                let child_position = child_object_to_world.w_axis.truncate();
-                let mut child_aabb = AABBVec3::from_scene_aabb(&child_node.bounding_box);
-                child_aabb.max += child_position;
-                child_aabb.min += child_position;
+                let child_aabb = transform_aabb(
+                    AABBVec3::from_scene_aabb(&child_node.bounding_box),
+                    &child_object_to_world,
+                );
 
                 if camera_frustum.intersects_aabb(&child_aabb) {
-                    self.draw_call_data
-                        .push(DrawCallData::new(*child_id, child_object_to_world));
+                    let child_material = scene.get_material(child_node.material_id);
+                    if child_material.material_properties.surface_type == SurfaceType::Opaque {
+                        self.opaque_object_draw_call_data
+                            .push(DrawCallData::new(*child_id, &child_object_to_world));
+                    } else {
+                        self.transparent_object_draw_call_data
+                            .push(DrawCallData::new(*child_id, &child_object_to_world));
+                    }
                 }
             }
         }
 
-        self.draw_call_data.sort_by(|a, b| {
+        let camera_position = camera.transform.position();
+
+        self.opaque_object_draw_call_data.sort_by(|a, b| {
             let a_position = a.object_to_world.w_axis.truncate();
-            let a_distance_to_camera = camera.transform.position().distance_squared(a_position);
+            let a_distance_to_camera = camera_position.distance_squared(a_position);
 
             let b_position = b.object_to_world.w_axis.truncate();
-            let b_distance_to_camera = camera.transform.position().distance_squared(b_position);
+            let b_distance_to_camera = camera_position.distance_squared(b_position);
+
+            a_distance_to_camera.total_cmp(&b_distance_to_camera)
+        });
+
+        self.transparent_object_draw_call_data.sort_by(|b, a| {
+            let a_position = a.object_to_world.w_axis.truncate();
+            let a_distance_to_camera = camera_position.distance_squared(a_position);
+
+            let b_position = b.object_to_world.w_axis.truncate();
+            let b_distance_to_camera = camera_position.distance_squared(b_position);
 
             a_distance_to_camera.total_cmp(&b_distance_to_camera)
         });
 
         RenderingStats {
             total_objects: total_objects,
-            visible_objects: self.draw_call_data.len() as u32,
+            visible_objects: self.opaque_object_draw_call_data.len() as u32,
+            frame_data_preparation_time: timer.elapsed(),
         }
     }
 
@@ -222,7 +265,8 @@ impl Renderer {
 
         let renderer = Renderer {
             current_mat_props: MaterialProperties::DEFAULT,
-            draw_call_data: Vec::with_capacity(128),
+            opaque_object_draw_call_data: Vec::with_capacity(128),
+            transparent_object_draw_call_data: Vec::with_capacity(16),
             depth_prepass_shader: (depth_prepass_source.compile(), *depth_prepass_source.mat_props()),
             skybox: Skybox::new(),
             render_targets: render_targets,
@@ -251,7 +295,11 @@ impl Renderer {
 
         let model_matrix_uniform_location = shader.find_uniform_location("u_model_matrix").unwrap();
 
-        for data in self.draw_call_data.iter() {
+        unsafe {
+            gl::Disable(gl::BLEND);
+        }
+
+        for data in self.opaque_object_draw_call_data.iter() {
             let node = scene.get_node(data.node_id);
             let mesh = scene.get_mesh(node.mesh_id);
 
@@ -275,11 +323,20 @@ impl Renderer {
             .framebuffer
             .set_active_render_target(RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
 
-        for data in self.draw_call_data.iter() {
+        for data in self.opaque_object_draw_call_data.iter() {
             self.render_node(scene, data.node_id, &data.object_to_world);
         }
 
         self.render_mesh(&self.skybox.mesh, &self.skybox.shader, &self.skybox.mat_props);
+
+        unsafe {
+            gl::Enable(gl::BLEND);
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+        }
+
+        for data in self.transparent_object_draw_call_data.iter() {
+            self.render_node(scene, data.node_id, &data.object_to_world);
+        }
     }
 
     pub fn render_post_processing(&self) {
@@ -419,7 +476,6 @@ impl RenderTargets {
 
         let (color_texture, depth_texture, normal_texture) =
             RenderTargets::create_texture_set(resolution.0, resolution.1);
-        // self.attach_textures(color_texture, depth_texture, normal_texture);
 
         self.color_texture = color_texture;
         self.depth_texture = depth_texture;

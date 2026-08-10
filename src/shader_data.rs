@@ -1,4 +1,4 @@
-use glam::{Mat4, UVec4, Vec2, Vec4, uvec4, vec2, vec4};
+use glam::{Mat4, Vec2, Vec4, vec2, vec4};
 
 use crate::{graphics, transform::Transform};
 

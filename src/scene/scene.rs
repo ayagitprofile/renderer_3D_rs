@@ -19,6 +19,11 @@ pub struct ShaderMaterialMapping {
     pub associated_materials: Vec<String>,
 }
 
+pub struct CustomShaders<'a> {
+    pub shader_file_paths: &'a [std::path::PathBuf],
+    pub mapping: &'a [ShaderMaterialMapping],
+}
+
 impl ShaderMaterialMapping {
     pub fn new(shader_name: &str, associated_materials: &[&str]) -> Self {
         Self {
@@ -130,7 +135,9 @@ impl Scene {
             self.add_root_node(root_node_id);
         }
 
-        self.shader_mat_props.clear();
+        self.shader_mat_props = HashMap::new();
+        self.shader_name_mapping = Vec::new();
+        ShaderSource::clear_cache();
     }
 
     fn create_node(
@@ -364,7 +371,7 @@ impl Scene {
         material_id
     }
 
-    pub fn load_cutom_shaders(&mut self, shader_file_paths: &[std::path::PathBuf], mapping: &[ShaderMaterialMapping]) {
+    fn load_custom_shaders(&mut self, shader_file_paths: &[std::path::PathBuf], mapping: &[ShaderMaterialMapping]) {
         self.shader_name_mapping = mapping.to_vec();
         self.shader_mat_props.reserve(shader_file_paths.len());
         self.shaders.reserve_exact(shader_file_paths.len());
@@ -384,7 +391,7 @@ impl Scene {
         }
     }
 
-    pub fn new() -> Self {
+    pub fn new(custom_shaders: Option<CustomShaders>) -> Self {
         let (default_textures, default_texture_ids) = Scene::create_default_textures();
 
         let source = ShaderSource::load_from_file(std::path::Path::new("assets/shaders/scene_shader.glsl"));
@@ -406,6 +413,10 @@ impl Scene {
             shader: source.compile(),
             name: "Default scene shader".to_smolstr(),
         });
+
+        if let Some(shaders) = custom_shaders {
+            scene.load_custom_shaders(shaders.shader_file_paths, shaders.mapping);
+        }
 
         scene
     }

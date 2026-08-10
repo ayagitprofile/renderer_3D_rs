@@ -35,6 +35,11 @@ pub struct ShaderSource {
 }
 
 impl ShaderSource {
+    pub fn clear_cache() {
+        INCLUDE_FILE_CACHE.lock().unwrap().clear();
+        INCLUDE_FILE_CACHE.lock().unwrap().shrink_to_fit();
+    }
+
     pub fn compile(&self) -> Shader {
         let vert_cstr = CStr::from_bytes_with_nul(self.vertex_source.as_bytes()).unwrap();
         let frag_cstr = CStr::from_bytes_with_nul(self.fragment_source.as_bytes()).unwrap();
@@ -184,6 +189,11 @@ impl ShaderSource {
                     mat_props.cull_mode = ShaderSource::parse_cull_command(line);
                     continue;
                 }
+
+                if line.contains(ShaderSource::SHADER_SURFACE_TYPE_COMMAND) {
+                    mat_props.surface_type = ShaderSource::parse_surface_type_command(line);
+                    continue;
+                }
             }
 
             match current_parsing_target {
@@ -311,6 +321,7 @@ impl ShaderSource {
     const SHADER_CULL_COMMAND: &str = "Cull";
     const SHADER_Z_WRITE_COMMAND: &str = "ZWrite";
     const SHADER_Z_TEST_COMMAND: &str = "ZTest";
+    const SHADER_SURFACE_TYPE_COMMAND: &str = "Surface";
 
     pub fn name(&self) -> &str {
         &self.name
@@ -318,5 +329,20 @@ impl ShaderSource {
 
     pub fn mat_props(&self) -> &MaterialProperties {
         &self.material_properties
+    }
+
+    fn parse_surface_type_command(line: &str) -> crate::graphics::material_properties::SurfaceType {
+        match ShaderSource::extract_directive_value(ShaderSource::SHADER_SURFACE_TYPE_COMMAND, line)
+            .expect("Failed to parse shader command")
+            .to_lowercase()
+            .as_str()
+        {
+            "opaque" => crate::graphics::material_properties::SurfaceType::Opaque,
+            "transparent" => crate::graphics::material_properties::SurfaceType::Transparent,
+            _ => {
+                println!("[ShaderSource] Warning unkown surface type command: {}", line);
+                crate::graphics::material_properties::SurfaceType::Opaque
+            }
+        }
     }
 }

@@ -1,17 +1,18 @@
-use std::{
-    path::Path,
-    sync::{Mutex, OnceLock},
-};
+use std::sync::{Mutex, OnceLock};
 
 use glam::Vec3;
 use imgui::TreeNodeFlags;
-use sdl2::{event::Event, keyboard::Keycode, video::GLProfile};
+use sdl2::{
+    event::Event,
+    keyboard::Keycode,
+    video::{FullscreenType, GLProfile},
+};
 
 use crate::{
     camera, camera_controller, gl,
     graphics::{self},
     input,
-    scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene::Scene},
+    scene::{self, light::LightData, light_data_buffer::LightDataBuffer, scene_controller::SceneController},
     shader_data,
     transform::Transform,
 };
@@ -36,13 +37,13 @@ impl App {
 
         let mut camera_controller = camera_controller::CameraController::new();
 
-        let mut scene = Scene::new();
-
-        scene.load_data_from_file(Path::new("assets/scenes/scene.glb"));
+        let mut scene_controller = scene::scene_controller::TestSceneController::new();
 
         let (window_size_x, window_size_y) = (self.sdl_window.size().0 as i32, self.sdl_window.size().1 as i32);
 
         let mut scene_renderer = scene::renderer::Renderer::new((window_size_x as u32, window_size_y as u32));
+
+        let mut draw_ui = true;
 
         'main_loop: loop {
             if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
@@ -108,6 +109,17 @@ impl App {
                 break 'main_loop;
             }
 
+            if input.get_key_down(input::Keycode::SPACE) {
+                let state = self.sdl_window.fullscreen_state();
+                let result = self.sdl_window.set_fullscreen(if state == FullscreenType::Off {
+                    FullscreenType::Desktop
+                } else {
+                    FullscreenType::Off
+                });
+
+                result.unwrap();
+            }
+
             if input.get_key_down(input::Keycode::TAB) {
                 self.sdl_context.mouse().set_relative_mouse_mode(false);
                 camera_controller.ignore_input = true;
@@ -116,28 +128,13 @@ impl App {
                 camera_controller.ignore_input = false;
             }
 
-            if false {
-                for i in 0..scene.root_nodes().len() {
-                    let node = scene.get_node_mut(scene.root_nodes()[i]);
-
-                    if node.transform.position().y < 0.25f32 {
-                        continue;
-                    }
-
-                    let time = std::time::Instant::now()
-                        .duration_since(self.time_on_app_startup)
-                        .as_secs_f32();
-
-                    let (s, _, t) = node.transform.model_matrix().to_scale_rotation_translation();
-
-                    let rotation = glam::Quat::from_axis_angle(Transform::UP, time);
-
-                    node.transform =
-                        Transform::from_model_matrix(glam::Mat4::from_scale_rotation_translation(s, rotation, t));
-                }
+            if input.get_key_down(input::Keycode::F1) {
+                draw_ui = !draw_ui;
             }
 
             camera_controller.update(&mut self.camera, delta_time, input);
+
+            scene_controller.update();
 
             shader_data.set_screen_size(self.sdl_window.size().0, self.sdl_window.size().1);
 
@@ -150,15 +147,17 @@ impl App {
 
             shader_data.upload_data();
 
-            let rendering_stats = scene_renderer.prepare_rendering_data(&scene, &self.camera);
+            let scene = scene_controller.scene();
+
+            let rendering_stats = scene_renderer.prepare_rendering_data(scene, &self.camera);
 
             scene_renderer.new_frame();
 
-            scene_renderer.render_depth_prepass(&scene);
+            scene_renderer.render_depth_prepass(scene);
 
             scene_renderer.ssao().compute_ambient_occlusion();
 
-            scene_renderer.render_forward_lighting(&scene);
+            scene_renderer.render_forward_lighting(scene);
 
             scene_renderer.render_post_processing();
 
@@ -167,66 +166,75 @@ impl App {
 
             let ui = self.imgui_context.new_frame();
 
-            ui.window("Window")
-                .size([120f32, 80f32], imgui::Condition::Appearing)
-                .always_auto_resize(true)
-                .movable(false)
-                .scrollable(false)
-                .scroll_bar(false)
+            ui.window("dummy window")
+                .size([100f32, 100f32], imgui::Condition::Always)
                 .title_bar(false)
-                .position([0f32, 0f32], imgui::Condition::Always)
-                .build(|| {
-                    if ui.collapsing_header("Rendering stats", TreeNodeFlags::DEFAULT_OPEN) {
-                        ui.text(format!(
-                            "Resolution: ({} by {})",
-                            self.sdl_window.size().0,
-                            self.sdl_window.size().1
-                        ));
-                        ui.text(format!("FPS: {}", (1f32 / delta_time) as i32));
-                        ui.text(format!("Frame time: {:.2} ms", delta_time * 1000f32));
-                    }
-                    if ui.collapsing_header("Camera", TreeNodeFlags::DEFAULT_OPEN) {
-                        let pos = vec3_to_string(self.camera.transform.position());
-                        let fwd = vec3_to_string(self.camera.transform.forward());
-                        ui.text(format!("Position: {}", pos));
-                        ui.text(format!("Forward: {}", fwd));
-                    }
-                    if ui.collapsing_header("Rendering", TreeNodeFlags::DEFAULT_OPEN) {
-                        ui.text(format!("Object count: {}", rendering_stats.total_objects));
-                        ui.text(format!("Visible objects: {}", rendering_stats.visible_objects));
-                    }
-                    if ui.collapsing_header("SSAO", TreeNodeFlags::DEFAULT_OPEN) {
-                        let (rx, ry) = (
-                            scene_renderer.ssao().ao_compute_result_texture().width(),
-                            scene_renderer.ssao().ao_compute_result_texture().height(),
-                        );
+                .position([-1000f32, -1000f32], imgui::Condition::Always)
+                .build(|| {});
 
-                        let ratio = (rx * ry) as f32 / (self.sdl_window.size().0 * self.sdl_window.size().1) as f32;
-
-                        ui.text(format!("Resolution: ({} by {})", rx, ry));
-
-                        ui.text(format!("Ratio to screen size: {:.2}", ratio));
-
-                        let ssao = scene_renderer.ssao_mut();
-
-                        let mut blur = *ssao.enable_blur_pass();
-                        if ui.checkbox("Enable blur pass", &mut blur) {
-                            *ssao.enable_blur_pass() = blur;
+            if draw_ui {
+                ui.window("Window")
+                    .size([120f32, 80f32], imgui::Condition::Appearing)
+                    .always_auto_resize(true)
+                    .movable(true)
+                    .scrollable(false)
+                    .scroll_bar(false)
+                    .title_bar(false)
+                    .position([0f32, 0f32], imgui::Condition::Appearing)
+                    .build(|| {
+                        if ui.collapsing_header("Rendering stats", TreeNodeFlags::DEFAULT_OPEN) {
+                            ui.text(format!(
+                                "Resolution: ({} by {})",
+                                self.sdl_window.size().0,
+                                self.sdl_window.size().1
+                            ));
+                            ui.text(format!("FPS: {}", (1f32 / delta_time) as i32));
+                            ui.text(format!("Frame time: {:.2} ms", delta_time * 1000f32));
                         }
-                        let mut r = ssao.radius();
-                        if ui.slider("Radius", 0f32, 1f32, &mut r) {
-                            ssao.set_radius(r);
+                        if ui.collapsing_header("Camera", TreeNodeFlags::DEFAULT_OPEN) {
+                            let pos = vec3_to_string(self.camera.transform.position());
+                            let fwd = vec3_to_string(self.camera.transform.forward());
+                            ui.text(format!("Position: {}", pos));
+                            ui.text(format!("Forward: {}", fwd));
                         }
-                        let mut db = ssao.depth_bias();
-                        if ui.slider("Depth bias", 0f32, 0.1f32, &mut db) {
-                            ssao.set_depth_bias(db);
+                        if ui.collapsing_header("Rendering", TreeNodeFlags::DEFAULT_OPEN) {
+                            ui.text(format!("Object count: {}", rendering_stats.total_objects));
+                            ui.text(format!("Visible objects: {}", rendering_stats.visible_objects));
                         }
-                        let mut s = ssao.strength();
-                        if ui.slider("Strength", 0f32, 10f32, &mut s) {
-                            ssao.set_strength(s);
+                        if ui.collapsing_header("SSAO", TreeNodeFlags::DEFAULT_OPEN) {
+                            let (rx, ry) = (
+                                scene_renderer.ssao().ao_compute_result_texture().width(),
+                                scene_renderer.ssao().ao_compute_result_texture().height(),
+                            );
+
+                            let ratio = (rx * ry) as f32 / (self.sdl_window.size().0 * self.sdl_window.size().1) as f32;
+
+                            ui.text(format!("Resolution: ({} by {})", rx, ry));
+
+                            ui.text(format!("Ratio to screen size: {:.2}", ratio));
+
+                            let ssao = scene_renderer.ssao_mut();
+
+                            let mut blur = *ssao.enable_blur_pass();
+                            if ui.checkbox("Enable blur pass", &mut blur) {
+                                *ssao.enable_blur_pass() = blur;
+                            }
+                            let mut r = ssao.radius();
+                            if ui.slider("Radius", 0f32, 1f32, &mut r) {
+                                ssao.set_radius(r);
+                            }
+                            let mut db = ssao.depth_bias();
+                            if ui.slider("Depth bias", 0f32, 0.1f32, &mut db) {
+                                ssao.set_depth_bias(db);
+                            }
+                            let mut s = ssao.strength();
+                            if ui.slider("Strength", 0f32, 10f32, &mut s) {
+                                ssao.set_strength(s);
+                            }
                         }
-                    }
-                });
+                        scene_controller.draw_ui(ui);
+                    });
+            }
 
             self.imgui_opengl_renderer.render(&mut self.imgui_context);
 

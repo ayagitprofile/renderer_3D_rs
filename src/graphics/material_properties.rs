@@ -18,23 +18,38 @@ pub enum DepthTestMode {
     Always = gl::ALWAYS,
 }
 
+#[repr(u32)]
+#[derive(Clone, Copy, Hash, PartialEq, Debug)]
+pub enum SurfaceType {
+    Opaque,
+    Transparent,
+}
+
 #[derive(Hash, PartialEq, Debug, Clone, Copy)]
 pub struct MaterialProperties {
     pub cull_mode: CullMode,
     pub depth_test_mode: DepthTestMode,
     pub depth_writing_enabled: bool,
+    pub surface_type: SurfaceType,
 }
 
 impl MaterialProperties {
-    pub const fn new(cull: CullMode, depth_test: DepthTestMode, depth_writing: bool) -> Self {
+    pub const fn new(
+        cull: CullMode,
+        depth_test: DepthTestMode,
+        depth_writing: bool,
+        surface_type: SurfaceType,
+    ) -> Self {
         Self {
             cull_mode: cull,
             depth_test_mode: depth_test,
             depth_writing_enabled: depth_writing,
+            surface_type,
         }
     }
 
-    pub const DEFAULT: MaterialProperties = MaterialProperties::new(CullMode::Back, DepthTestMode::LessEqual, true);
+    pub const DEFAULT: MaterialProperties =
+        MaterialProperties::new(CullMode::Back, DepthTestMode::LessEqual, true, SurfaceType::Opaque);
 }
 
 impl DepthTestMode {

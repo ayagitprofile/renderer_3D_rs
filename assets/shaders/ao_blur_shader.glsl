@@ -197,7 +197,6 @@ void main() {
         result += ao2 * w2;
 
         total += w1 + w2;
-
     }
 
     result /= total;

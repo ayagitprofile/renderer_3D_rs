@@ -13,6 +13,7 @@ out mat3 v_TBN;
 Cull Back
 ZWrite Off
 ZTest Equal
+Surface Opaque
 
 vec3 normal_oct_decode(vec2 e)
 {
