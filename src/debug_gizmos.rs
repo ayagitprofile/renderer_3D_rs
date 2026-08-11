@@ -39,10 +39,6 @@ impl DebugGizmoRenderer {
     pub fn render_lightbulb(&self, position: Vec3, scale: Vec3, color: Vec3) {
         let shader = &self.shader.0;
 
-        unsafe {
-            gl::Enable(gl::BLEND);
-        }
-
         graphics::utility::apply_mat_props(&self.shader.1);
 
         let mat = Mat4::from_scale_rotation_translation(scale, Quat::IDENTITY, position);
@@ -61,6 +57,8 @@ impl DebugGizmoRenderer {
         self.lightbulb_mesh.vao().bind();
 
         unsafe {
+            gl::Enable(gl::BLEND);
+
             gl::DrawElements(
                 gl::TRIANGLES,
                 self.lightbulb_mesh.index_count(),

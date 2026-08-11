@@ -3,12 +3,14 @@ use glam::{Mat3, Mat4, Vec3, Vec4};
 use super::{data, scene::Scene};
 use crate::ambient_occlusion::AmbientOcclusion;
 use crate::camera::Camera;
+use crate::graphics::buffer::GraphicsBuffer;
 use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::material_properties::{MaterialProperties, SurfaceType};
 use crate::graphics::mesh::Mesh;
 use crate::graphics::shader::Shader;
 use crate::graphics::texture::{self, Texture};
 use crate::scene::skybox::Skybox;
+use crate::scene::value_range::{self, ValueRange};
 use crate::shader_source::ShaderSource;
 use crate::{ambient_occlusion, gl, graphics, timer};
 
@@ -28,9 +30,35 @@ pub struct Renderer {
     ambient_occlusion: ambient_occlusion::AmbientOcclusion,
 
     post_process_fs_quad: graphics::fullscreen_quad::FullscreenQuad,
+
+    post_process_config: PostProcessingConfig,
+
+    post_process_config_buffer: GraphicsBuffer,
 }
 
-pub struct RenderTargets {
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GPUPostProcessConfig {
+    pub chromatic_abberation: f32,
+    pub vignette: f32,
+}
+
+impl GPUPostProcessConfig {
+    fn from_cpu_config(config: &PostProcessingConfig) -> Self {
+        Self {
+            chromatic_abberation: config.chromatic_abberation.value(),
+            vignette: config.vignette.value(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PostProcessingConfig {
+    pub chromatic_abberation: value_range::ValueRange,
+    pub vignette: value_range::ValueRange,
+}
+
+struct RenderTargets {
     framebuffer: Framebuffer,
 
     color_texture: texture::Texture2D,
@@ -152,6 +180,10 @@ fn transform_aabb(aabb: AABBVec3, world: &Mat4) -> (AABBVec3, Vec3) {
 }
 
 impl Renderer {
+    pub fn post_processing_config_mut(&mut self) -> &mut PostProcessingConfig {
+        &mut self.post_process_config
+    }
+
     pub fn prepare_rendering_data(&mut self, scene: &Scene, camera: &Camera) -> RenderingStats {
         let timer = timer::Timer::start("");
 
@@ -279,6 +311,17 @@ impl Renderer {
             render_targets.color_texture.bindless_handle(),
         );
 
+        let pp_config = PostProcessingConfig {
+            chromatic_abberation: ValueRange::new(0.005f32, 0f32, 0.1f32),
+            vignette: ValueRange::new(0.05f32, 0f32, 1f32),
+        };
+
+        let mut post_process_buffer = GraphicsBuffer::new();
+
+        post_process_buffer.allocate(&[pp_config], graphics::buffer::Usage::Dynamic);
+
+        post_process_buffer.set_binding(graphics::buffer::BindingTarget::UniformBuffer, 1);
+
         let renderer = Renderer {
             current_mat_props: MaterialProperties::DEFAULT,
             opaque_object_draw_call_data: Vec::with_capacity(128),
@@ -288,6 +331,8 @@ impl Renderer {
             render_targets: render_targets,
             ambient_occlusion: ao,
             post_process_fs_quad: fs_quad,
+            post_process_config: pp_config,
+            post_process_config_buffer: post_process_buffer,
         };
 
         graphics::utility::try_set_bindless_texture(
@@ -357,6 +402,10 @@ impl Renderer {
 
     pub fn render_post_processing(&self) {
         graphics::framebuffer::bind_default_framebuffer();
+        let gpu_pp_config = GPUPostProcessConfig::from_cpu_config(&self.post_process_config);
+
+        self.post_process_config_buffer.upload_data(&[gpu_pp_config]);
+
         self.post_process_fs_quad.render();
     }
 

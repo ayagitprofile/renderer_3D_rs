@@ -134,6 +134,12 @@ impl Shader {
         }
     }
 
+    pub fn set_uniform_f32(&self, location: i32, value: f32) {
+        unsafe {
+            gl::ProgramUniform1f(self.id, location, value);
+        }
+    }
+
     fn load_uniform_data(id: u32) -> UniformDataStorage {
         let mut storage = UniformDataStorage::new();
 

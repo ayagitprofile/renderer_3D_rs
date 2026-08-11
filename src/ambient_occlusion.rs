@@ -37,7 +37,7 @@ pub struct AmbientOcclusion {
     output_texture: texture::Texture2D,
 
     _random_directions_texture: texture::Texture2D,
-    _kernel_samples_buffer: GraphicsBuffer,
+    kernel_samples_buffer: GraphicsBuffer,
 
     uniform_data: SSAOComputeUniformData,
     uniform_data_buffer: GraphicsBuffer,
@@ -82,8 +82,14 @@ impl AmbientOcclusion {
             strength: self.uniform_data.strength.clamp(0f32, 10f32),
         };
 
+        self.kernel_samples_buffer.set_binding(
+            graphics::buffer::BindingTarget::ShaderStorageBuffer,
+            COMPUTE_SHADER_KERNEL_DATA_BUFFER_BINDING,
+        );
+
         self.uniform_data_buffer
             .set_binding(graphics::buffer::BindingTarget::UniformBuffer, 0);
+
         self.uniform_data_buffer.upload_data(&[uniform_data]);
 
         const COMPUTE_THREADS_PER_WORK_GROUP_X: u32 = 16;
@@ -262,10 +268,6 @@ impl AmbientOcclusion {
 
         let mut kernel_samples_buffer = graphics::buffer::GraphicsBuffer::new();
         kernel_samples_buffer.allocate(kernel_samples.as_slice(), graphics::buffer::Usage::Static);
-        kernel_samples_buffer.set_binding(
-            graphics::buffer::BindingTarget::ShaderStorageBuffer,
-            COMPUTE_SHADER_KERNEL_DATA_BUFFER_BINDING,
-        );
 
         let uniform_data = SSAOComputeUniformData {
             radius: 0.2f32,
@@ -306,7 +308,7 @@ impl AmbientOcclusion {
             ao_blur_compute_shader: ao_blur_shader,
 
             _random_directions_texture: random_direction_texture,
-            _kernel_samples_buffer: kernel_samples_buffer,
+            kernel_samples_buffer,
 
             output_texture: output_texture,
             ao_compute_stage_texture: ao_compute_stage_texture,

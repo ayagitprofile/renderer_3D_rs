@@ -19,6 +19,7 @@ use crate::{
         light::{LightData, LightType},
         light_data_buffer::LightDataBuffer,
         scene_controller::SceneController,
+        value_range,
     },
     shader_data,
     transform::Transform,
@@ -50,6 +51,8 @@ impl App {
         let mut scene_renderer = scene::renderer::Renderer::new((window_size_x as u32, window_size_y as u32));
 
         let mut draw_ui = true;
+
+        let mut draw_gizmos = true;
 
         let gizmo_renderer = DebugGizmoRenderer::new();
 
@@ -169,17 +172,19 @@ impl App {
 
             scene_renderer.render_post_processing();
 
-            for light in light_data.lights() {
-                match light.type_of_light {
-                    LightType::Directional => {}
-                    LightType::Point => {
-                        gizmo_renderer.render_lightbulb(
-                            Vec3::from_array(light.position),
-                            vec3(0.3, 0.3, 0.3),
-                            Vec3::from_array(light.color),
-                        );
+            if draw_gizmos {
+                for light in light_data.lights() {
+                    match light.type_of_light {
+                        LightType::Directional => {}
+                        LightType::Point => {
+                            gizmo_renderer.render_lightbulb(
+                                Vec3::from_array(light.position),
+                                vec3(0.3, 0.3, 0.3),
+                                Vec3::from_array(light.color),
+                            );
+                        }
+                        LightType::Spot => {}
                     }
-                    LightType::Spot => {}
                 }
             }
 
@@ -254,6 +259,14 @@ impl App {
                                 ssao.set_strength(s);
                             }
                         }
+                        if ui.collapsing_header("Post processing", TreeNodeFlags::DEFAULT_OPEN) {
+                            let config = scene_renderer.post_processing_config_mut();
+                            App::draw_value_range_ui(ui, "Chromatic abberation", &mut config.chromatic_abberation);
+                            App::draw_value_range_ui(ui, "Vignette", &mut config.vignette);
+                        }
+                        if ui.collapsing_header("Debug", TreeNodeFlags::DEFAULT_OPEN) {
+                            ui.checkbox("Draw gizmos", &mut draw_gizmos);
+                        }
                         scene_controller.draw_ui(ui);
                     });
             }
@@ -261,6 +274,13 @@ impl App {
             self.imgui_opengl_renderer.render(&mut self.imgui_context);
 
             self.sdl_window.gl_swap_window();
+        }
+    }
+
+    fn draw_value_range_ui(ui: &imgui::Ui, label: &str, value_range: &mut value_range::ValueRange) {
+        let mut value = value_range.value();
+        if ui.slider(label, value_range.min(), value_range.max(), &mut value) {
+            value_range.set_value(value);
         }
     }
 

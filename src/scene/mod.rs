@@ -10,3 +10,4 @@ pub mod scene;
 pub mod scene_controller;
 pub mod skybox;
 pub mod textures;
+pub mod value_range;
