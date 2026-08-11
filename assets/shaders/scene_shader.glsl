@@ -193,6 +193,8 @@ vec3 evaluate_BRDF(
         NdotL;
 }
 
+const float LIGHT_UNIT_SCALE = 0.001;
+
 vec3 calculate_directional_light(
     Core_Light light,
     vec3 N,
@@ -204,9 +206,13 @@ vec3 calculate_directional_light(
 {
     vec3 L = normalize(-light.direction.xyz);
 
-    float intensity = light.color.w;
+    // glTF KHR_lights_punctual directional intensity is lux.
+    float illuminance = light.color.w;
 
-    vec3 radiance = light.color.rgb * intensity;
+    // Renderer exposure / unit conversion.
+    float irradiance = illuminance * LIGHT_UNIT_SCALE;
+
+    vec3 radiance = light.color.rgb * irradiance;
 
     return evaluate_BRDF(
         N,
@@ -233,29 +239,39 @@ vec3 calculate_point_light(
     vec3 toLight = light.position.xyz - position_ws;
 
     float distanceToLight = length(toLight);
-
     float light_range = light.attenuation.w;
 
-    if (distanceToLight > light_range)
+    if (distanceToLight >= light_range)
         return vec3(0.0);
 
-    vec3 L = toLight / distanceToLight;
+    vec3 L = toLight / max(distanceToLight, 0.0001);
 
     float attenuation =
         1.0 / max(distanceToLight * distanceToLight, 0.0001);
 
-    attenuation *=
-        pow(clamp(1.0 - distanceToLight / light_range, 0.0, 1.0), 2.0);
+    // Smoothly fade to zero at range.
+    float range_fade =
+        pow(
+            clamp(1.0 - distanceToLight / light_range, 0.0, 1.0),
+            2.0
+        );
 
+    attenuation *= range_fade;
+
+    // glTF point-light intensity is candela.
     float intensity = light.color.w;
 
-    vec3 radiance = light.color.rgb * intensity * attenuation;
+    vec3 irradiance =
+        light.color.rgb *
+        intensity *
+        LIGHT_UNIT_SCALE *
+        attenuation;
 
     return evaluate_BRDF(
         N,
         V,
         L,
-        radiance,
+        irradiance,
         albedo,
         metallic,
         roughness,
@@ -276,26 +292,34 @@ vec3 calculate_spot_light(
     vec3 toLight = light.position.xyz - position_ws;
 
     float distanceToLight = length(toLight);
-
     float light_range = light.attenuation.w;
 
-    if (distanceToLight > light_range)
+    if (distanceToLight >= light_range)
         return vec3(0.0);
 
-    vec3 L = toLight / distanceToLight;
+    vec3 L = toLight / max(distanceToLight, 0.0001);
 
+    // Inverse-square attenuation.
     float attenuation =
         1.0 / max(distanceToLight * distanceToLight, 0.0001);
 
-    attenuation *=
-        pow(clamp(1.0 - distanceToLight / light_range, 0.0, 1.0), 2.0);
+    // Fade out at the specified range.
+    float range_fade =
+        pow(
+            clamp(1.0 - distanceToLight / light_range, 0.0, 1.0),
+            2.0
+        );
 
-    float theta = dot(L, normalize(-light.direction.xyz));
+    attenuation *= range_fade;
+
+    // Spot cone.
+    float theta =
+        dot(L, normalize(-light.direction.xyz));
 
     float inner_cos = light.spot_light_data.x;
     float outer_cos = light.spot_light_data.y;
 
-    float epsilon = inner_cos - outer_cos;
+    float epsilon = max(inner_cos - outer_cos, 0.0001);
 
     float spot =
         clamp(
@@ -304,15 +328,21 @@ vec3 calculate_spot_light(
             1.0
         );
 
+    // glTF spot-light intensity is candela.
     float intensity = light.color.w;
 
-    vec3 radiance = light.color.rgb * intensity * attenuation * spot;
+    vec3 irradiance =
+        light.color.rgb *
+        intensity *
+        LIGHT_UNIT_SCALE *
+        attenuation *
+        spot;
 
     return evaluate_BRDF(
         N,
         V,
         L,
-        radiance,
+        irradiance,
         albedo,
         metallic,
         roughness,

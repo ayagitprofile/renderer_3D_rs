@@ -1,11 +1,43 @@
 use crate::{graphics::buffer::GraphicsBuffer, scene::light::LightData};
 
+use super::light::GPULightData;
+
 const BUFFER_HEADER_SIZE: usize = size_of::<[u32; 4]>();
-const LIGHT_DATA_SIZE: usize = size_of::<super::light::GPULightData>();
+const LIGHT_DATA_SIZE: usize = size_of::<GPULightData>();
+
+pub struct LightDataStorage {
+    lights: Vec<LightData>,
+    cpu_light_buffer: Vec<GPULightData>,
+    gpu_light_buffer: GraphicsBuffer,
+}
+
+impl LightDataStorage {
+    pub fn lights(&self) -> &[LightData] {
+        self.lights.as_slice()
+    }
+
+    pub fn new(scene_lights: &[LightData]) -> Self {
+        let cpu_light_buffer: Vec<GPULightData> = scene_lights.iter().map(|e| e.to_gpu_data()).collect();
+
+        let mut gpu_light_buffer = GraphicsBuffer::new();
+
+        gpu_light_buffer.allocate(cpu_light_buffer.as_slice(), crate::graphics::buffer::Usage::Dynamic);
+        gpu_light_buffer.set_binding(
+            crate::graphics::buffer::BindingTarget::ShaderStorageBuffer,
+            super::buffers::SHADER_LIGHT_DATA_BUFFER_BINDING_INDEX,
+        );
+
+        Self {
+            lights: scene_lights.to_vec(),
+            cpu_light_buffer: cpu_light_buffer,
+            gpu_light_buffer: gpu_light_buffer,
+        }
+    }
+}
 
 pub struct LightDataBuffer {
     data: Vec<u8>,
-    lights: Vec<super::light::LightData>,
+    lights: Vec<LightData>,
     gpu_buffer: GraphicsBuffer,
 }
 
@@ -14,8 +46,8 @@ impl LightDataBuffer {
         &self.lights
     }
 
-    pub fn new(light_data: &[super::light::LightData]) -> Self {
-        let data: Vec<super::light::GPULightData> = light_data.iter().map(|e| e.to_gpu_data()).collect();
+    pub fn new(light_data: &[LightData]) -> Self {
+        let data: Vec<GPULightData> = light_data.iter().map(|e| e.to_gpu_data()).collect();
 
         let header = [data.len() as u32, 0, 0, 0];
 

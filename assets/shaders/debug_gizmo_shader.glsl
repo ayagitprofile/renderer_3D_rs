@@ -6,10 +6,10 @@ layout(location = 0) in vec3 a_position;
 
 uniform mat4 u_model_matrix;
 
-Cull Off
-ZWrite On
+Cull Back
+ZWrite Off
 ZTest Always
-Surface Opaque
+Surface Transparent
 
 void main() {
     vec4 position_ws = u_model_matrix * vec4(a_position, 1);

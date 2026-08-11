@@ -11,7 +11,6 @@ struct Core_Light {
 };
 
 layout(std430, binding = 1) buffer light_data_buffer {
-    uvec4 light_count;
     Core_Light lights[];
 } light_data;
 
@@ -19,7 +18,7 @@ layout(std430, binding = 1) buffer light_data_buffer {
 #define CORE_LIGHT_TYPE_POINT (1)
 #define CORE_LIGHT_TYPE_SPOT (2)
 
-#define CORE_LIGHT_COUNT (light_data.light_count.x)
+#define CORE_LIGHT_COUNT (light_data.lights.length())
 #define CORE_LIGHT_ARRAY (light_data.lights)
 
 #endif // CORE_LIGHT_DATA_BUFFER_INCLUDED

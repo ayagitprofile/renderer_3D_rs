@@ -14,13 +14,7 @@ use crate::{
     gl,
     graphics::{self},
     input,
-    scene::{
-        self,
-        light::{LightData, LightType},
-        light_data_buffer::LightDataBuffer,
-        scene_controller::SceneController,
-        value_range,
-    },
+    scene::{self, light::LightType, scene_controller::SceneController, value_range},
     shader_data,
     transform::Transform,
 };
@@ -31,12 +25,12 @@ impl App {
     pub fn run(&mut self) {
         let mut shader_data = shader_data::GlobalShaderData::new();
 
-        let light_data = LightDataBuffer::new(&[
-            LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 1.9f32),
-            LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 3f32, 10f32),
-            LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 3f32, 10f32),
-            LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 3f32, 10f32),
-        ]);
+        // let light_data = LightDataBuffer::new(&[
+        //     LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 1.9f32),
+        //     LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 3f32, 10f32),
+        //     LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 3f32, 10f32),
+        //     LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 3f32, 10f32),
+        // ]);
 
         self.camera
             .transform
@@ -175,9 +169,14 @@ impl App {
             scene_renderer.render_post_processing();
 
             if draw_gizmos {
-                for light in light_data.lights() {
+                for light in scene_controller.scene().lights.lights() {
                     match light.type_of_light {
-                        LightType::Directional => {}
+                        LightType::Directional => {
+                            gizmo_renderer.render_directional_light(
+                                Vec3::from_array(light.color),
+                                Vec3::from_array(light.direction),
+                            );
+                        }
                         LightType::Point => {
                             gizmo_renderer.render_lightbulb(
                                 Vec3::from_array(light.position),

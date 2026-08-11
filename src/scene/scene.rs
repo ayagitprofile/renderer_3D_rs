@@ -4,7 +4,10 @@ use glam::Mat4;
 use gltf::material::AlphaMode;
 use smol_str::{SmolStr, ToSmolStr};
 
-use super::data::{Material, MaterialID, MeshID, NamedShader, NamedTexture, Node, NodeID, ShaderID, TextureID};
+use super::{
+    data::{Material, MaterialID, MeshID, NamedShader, NamedTexture, Node, NodeID, ShaderID, TextureID},
+    light_data_buffer::LightDataStorage,
+};
 
 use crate::{
     graphics::{
@@ -16,7 +19,7 @@ use crate::{
         utility::CubemapSide,
         vertex,
     },
-    scene::data::AABB,
+    scene::{data::AABB, light::LightType},
     shader_source::ShaderSource,
     timer,
     transform::Transform,
@@ -57,6 +60,8 @@ pub struct Scene {
     default_transparent_shader: (ShaderID, MaterialProperties),
 
     cubemap: Cubemap,
+
+    pub lights: LightDataStorage,
 }
 
 struct DefaultTextures {
@@ -172,7 +177,7 @@ impl Scene {
 
         let mut nodes: std::vec::Vec<gltf::Node> = document
             .nodes()
-            .filter(|node| node.mesh().is_some_and(|mesh| mesh.primitives().len() > 0))
+            .filter(|node| node.mesh().is_some_and(|mesh| mesh.primitives().len() > 0) || node.light().is_some())
             .collect();
 
         nodes.sort_by(|a, b| b.children().len().cmp(&a.children().len()));
@@ -181,8 +186,49 @@ impl Scene {
 
         let mut discovered_materials = HashMap::new();
 
+        let mut lights = Vec::new();
+
         for node in nodes {
             if !discovered_nodes.insert(node.index()) {
+                continue;
+            }
+
+            if let Some(light) = node.light() {
+                use gltf::khr_lights_punctual::Kind as LightKind;
+
+                let node_transform = transform_from_node(&node);
+
+                let light_data = match light.kind() {
+                    LightKind::Directional => super::light::LightData::new_directional_light(
+                        node_transform.forward().to_array(),
+                        light.color(),
+                        light.intensity(),
+                    ),
+                    LightKind::Point => super::light::LightData::new_point_light(
+                        node_transform.position().to_array(),
+                        light.color(),
+                        light.intensity(),
+                        light.range().unwrap_or(1000f32),
+                    ),
+                    LightKind::Spot {
+                        inner_cone_angle,
+                        outer_cone_angle,
+                    } => super::light::LightData::new(
+                        LightType::Spot,
+                        node_transform.position().to_array(),
+                        node_transform.forward().to_array(),
+                        light.color(),
+                        light.intensity(),
+                        1f32,
+                        1f32,
+                        1f32,
+                        light.range().unwrap_or(1000f32),
+                        inner_cone_angle.cos(),
+                        outer_cone_angle.cos(),
+                    ),
+                };
+
+                lights.push(light_data);
                 continue;
             }
 
@@ -234,6 +280,7 @@ impl Scene {
             self.add_root_node(root_node_id);
         }
 
+        self.lights = LightDataStorage::new(&lights);
         self.shader_mat_props = HashMap::new();
         self.shader_name_mapping = Vec::new();
         ShaderSource::clear_cache();
@@ -557,6 +604,7 @@ impl Scene {
             default_opaque_shader: (ShaderID::new(0), *scene_shader_source.mat_props()),
             default_transparent_shader: (ShaderID::new(1), transparent_mat_props),
             cubemap,
+            lights: LightDataStorage::new(&[]),
         };
 
         scene.default_opaque_shader.0 = scene.add_shader(NamedShader {
