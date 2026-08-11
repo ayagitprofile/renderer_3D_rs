@@ -7,7 +7,15 @@ use smol_str::{SmolStr, ToSmolStr};
 use super::data::{Material, MaterialID, MeshID, NamedShader, NamedTexture, Node, NodeID, ShaderID, TextureID};
 
 use crate::{
-    graphics::{self, material_properties::MaterialProperties, mesh::Mesh, shader::Shader, texture::Texture2D, vertex},
+    graphics::{
+        self,
+        material_properties::MaterialProperties,
+        mesh::Mesh,
+        shader::Shader,
+        texture::{Cubemap, Texture2D},
+        utility::CubemapSide,
+        vertex,
+    },
     scene::data::AABB,
     shader_source::ShaderSource,
     timer,
@@ -47,6 +55,8 @@ pub struct Scene {
 
     default_opaque_shader: (ShaderID, MaterialProperties),
     default_transparent_shader: (ShaderID, MaterialProperties),
+
+    cubemap: Cubemap,
 }
 
 struct DefaultTextures {
@@ -70,6 +80,80 @@ impl DefaultTextures {
 }
 
 impl Scene {
+    const SPECIAL_CUBEMAP_TEXTURE_CONTAINER_OBJECT_NAME: &str = "cubemap_texture_set";
+
+    fn load_cubemap(cubemap_container_node: &gltf::Node, image_storage: &Vec<gltf::image::Data>) -> Option<Cubemap> {
+        let mut cubemap_data = std::collections::HashMap::new();
+
+        for node in cubemap_container_node.children().filter(|el| el.mesh().is_some()) {
+            if let Some(primitive) = node.mesh().unwrap().primitives().last() {
+                if let Some(texture_info) = primitive.material().pbr_metallic_roughness().base_color_texture() {
+                    if let Some(cubemap_side) =
+                        graphics::utility::CubemapSide::from_str(primitive.material().name().unwrap_or_default())
+                    {
+                        cubemap_data.insert(cubemap_side, texture_info.texture().source().index());
+                    }
+                }
+            }
+        }
+
+        if cubemap_data.len() != 6 {
+            println!(
+                "[Scene] Failed to load cubemap, not enough textures provided: {}",
+                cubemap_data.len()
+            );
+            return None;
+        }
+
+        if cubemap_data.iter().all(|el| {
+            let reference_data = &image_storage[cubemap_data[&CubemapSide::Left]];
+
+            let data = &image_storage[*el.1];
+            data.format == reference_data.format
+                && data.height == reference_data.height
+                && data.width == reference_data.width
+        }) == false
+        {
+            println!("[Scene] Failed to load cubemap, textures have different metadata");
+            return None;
+        }
+
+        let data_channels = match image_storage[cubemap_data[&CubemapSide::Left]].format {
+            gltf::image::Format::R8 => 1,
+            gltf::image::Format::R8G8 => 2,
+            gltf::image::Format::R8G8B8 => 3,
+            gltf::image::Format::R8G8B8A8 => 4,
+
+            _ => {
+                println!(
+                    "[Scene] Failed to load cubemap, unsupported data format: {:?}",
+                    image_storage[cubemap_data[&CubemapSide::Left]].format
+                );
+
+                return None;
+            }
+        };
+
+        let (width, height) = (
+            image_storage[cubemap_data[&CubemapSide::Left]].width,
+            image_storage[cubemap_data[&CubemapSide::Left]].height,
+        );
+
+        Some(graphics::texture::Cubemap::load_from_memory(
+            width,
+            height,
+            data_channels,
+            graphics::texture::StorageFormat::RGB,
+            graphics::texture::FilteringMode::Trilinear,
+            image_storage[cubemap_data[&CubemapSide::Left]].pixels.as_ptr(),
+            image_storage[cubemap_data[&CubemapSide::Right]].pixels.as_ptr(),
+            image_storage[cubemap_data[&CubemapSide::Top]].pixels.as_ptr(),
+            image_storage[cubemap_data[&CubemapSide::Bottom]].pixels.as_ptr(),
+            image_storage[cubemap_data[&CubemapSide::Front]].pixels.as_ptr(),
+            image_storage[cubemap_data[&CubemapSide::Back]].pixels.as_ptr(),
+        ))
+    }
+
     pub fn load_data_from_file(&mut self, scene_file: &std::path::Path) {
         let _timer = timer::ScopedTimer::start(&format!("Loading scene: {}", scene_file.to_str().unwrap()));
 
@@ -99,6 +183,18 @@ impl Scene {
 
         for node in nodes {
             if !discovered_nodes.insert(node.index()) {
+                continue;
+            }
+
+            if node.name().unwrap_or_default() == Scene::SPECIAL_CUBEMAP_TEXTURE_CONTAINER_OBJECT_NAME {
+                for child in node.children() {
+                    discovered_nodes.insert(child.index());
+                }
+
+                if let Some(cubemap) = Scene::load_cubemap(&node, &images) {
+                    self.cubemap = cubemap;
+                }
+
                 continue;
             }
 
@@ -416,6 +512,10 @@ impl Scene {
         }
     }
 
+    pub fn cubemap(&self) -> &Cubemap {
+        &self.cubemap
+    }
+
     pub fn new(custom_shaders: Option<CustomShaders>) -> Self {
         let (default_textures, default_texture_ids) = Scene::create_default_textures();
 
@@ -427,6 +527,22 @@ impl Scene {
         transparent_mat_props.surface_type = graphics::material_properties::SurfaceType::Transparent;
         transparent_mat_props.depth_writing_enabled = false;
         transparent_mat_props.depth_test_mode = graphics::material_properties::DepthTestMode::LessEqual;
+
+        let data_ptr = super::textures::EMO_TEXTURE_DATA.as_ptr() as *const u8;
+
+        let cubemap = graphics::texture::Cubemap::load_from_memory(
+            2,
+            2,
+            4,
+            graphics::texture::StorageFormat::RGB,
+            graphics::texture::FilteringMode::Nearest,
+            data_ptr,
+            data_ptr,
+            data_ptr,
+            data_ptr,
+            data_ptr,
+            data_ptr,
+        );
 
         let mut scene = Scene {
             meshes: Vec::<Mesh>::new(),
@@ -440,6 +556,7 @@ impl Scene {
             shader_name_mapping: Vec::new(),
             default_opaque_shader: (ShaderID::new(0), *scene_shader_source.mat_props()),
             default_transparent_shader: (ShaderID::new(1), transparent_mat_props),
+            cubemap,
         };
 
         scene.default_opaque_shader.0 = scene.add_shader(NamedShader {
@@ -463,8 +580,6 @@ impl Scene {
         const TANGENT_SPACE_UP: [f32; 4] = [0f32, 0f32, 1f32, 0f32];
         const METALLIC_ROUGHNESS: [f32; 4] = [0f32, 0.5f32, 0f32, 1f32];
 
-        const EMO_TEXTURE_DATA: [[u8; 4]; 4] = [[255, 0, 255, 255], [0, 0, 0, 0], [0, 0, 0, 0], [255, 0, 255, 255]];
-
         use graphics::texture::FilteringMode;
         use graphics::texture::StorageFormat;
 
@@ -476,7 +591,7 @@ impl Scene {
                     StorageFormat::SRGBA,
                     FilteringMode::Nearest,
                     4,
-                    EMO_TEXTURE_DATA.as_ptr() as *const std::ffi::c_void
+                    super::textures::EMO_TEXTURE_DATA.as_ptr() as *const std::ffi::c_void
                 ),
                 name: super::textures::ALBEDO_TEXTURE_NAME.to_smolstr(),
             },

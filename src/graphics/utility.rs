@@ -61,7 +61,7 @@ pub fn set_cull_mode(value: mat_props::CullMode) {
 
 #[repr(u32)]
 #[derive(Hash, Eq, PartialEq)]
-enum CubemapSides {
+pub enum CubemapSide {
     Right = 0,
     Left = 1,
     Top = 2,
@@ -70,15 +70,15 @@ enum CubemapSides {
     Back = 5,
 }
 
-impl CubemapSides {
+impl CubemapSide {
     pub fn from_u32(val: u32) -> Option<Self> {
         match val {
-            0 => Some(CubemapSides::Right),
-            1 => Some(CubemapSides::Left),
-            2 => Some(CubemapSides::Top),
-            3 => Some(CubemapSides::Bottom),
-            4 => Some(CubemapSides::Front),
-            5 => Some(CubemapSides::Back),
+            0 => Some(CubemapSide::Right),
+            1 => Some(CubemapSide::Left),
+            2 => Some(CubemapSide::Top),
+            3 => Some(CubemapSide::Bottom),
+            4 => Some(CubemapSide::Front),
+            5 => Some(CubemapSide::Back),
             _ => None,
         }
     }
@@ -86,12 +86,12 @@ impl CubemapSides {
     #[rustfmt::skip]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "right"  | "+x" => Some(Self::Right),
-            "left"   | "-x" => Some(Self::Left),
-            "top"    | "+y" => Some(Self::Top),
-            "bottom" | "-y" => Some(Self::Bottom),
-            "front"  | "+z" => Some(Self::Front),
-            "back"   | "-z" => Some(Self::Back),
+            "skybox_right"  | "right"  | "cubemap_right"  | "+x" => Some(Self::Right),
+            "skybox_left"   | "left"   | "cubemap_left"   | "-x" => Some(Self::Left),
+            "skybox_top"    | "top"    | "cubemap_top"    | "+y" => Some(Self::Top),
+            "skybox_bottom" | "bottom" | "cubemap_bottom" | "-y" => Some(Self::Bottom),
+            "skybox_front"  | "front"  | "cubemap_front"  | "+z" => Some(Self::Front),
+            "skybox_back"   | "back"   | "cubemap_back"   | "-z" => Some(Self::Back),
             _ => None,
         }
     }
@@ -133,7 +133,7 @@ pub fn load_cubemap_from_sub_textures(directory_path: &std::path::Path, storage_
             continue;
         }
 
-        if let Some(side) = CubemapSides::from_str(file_path.file_stem().unwrap().to_str().unwrap()) {
+        if let Some(side) = CubemapSide::from_str(file_path.file_stem().unwrap().to_str().unwrap()) {
             sides.insert(side, file_path.clone());
         }
     }
@@ -177,20 +177,21 @@ pub fn load_cubemap_from_sub_textures(directory_path: &std::path::Path, storage_
         "Cubemap textures have different dimensions"
     );
 
-    let left = side_data[&CubemapSides::Left];
-    let right = side_data[&CubemapSides::Right];
-    let top = side_data[&CubemapSides::Top];
-    let bottom = side_data[&CubemapSides::Bottom];
-    let front = side_data[&CubemapSides::Front];
-    let back = side_data[&CubemapSides::Back];
+    let left = side_data[&CubemapSide::Left];
+    let right = side_data[&CubemapSide::Right];
+    let top = side_data[&CubemapSide::Top];
+    let bottom = side_data[&CubemapSide::Bottom];
+    let front = side_data[&CubemapSide::Front];
+    let back = side_data[&CubemapSide::Back];
 
     let (width, height, channels) = (left.width as u32, left.height as u32, left.channels as u32);
 
     let cubemap = texture::Cubemap::load_from_memory(
         width,
         height,
-        storage_format,
         channels,
+        storage_format,
+        texture::FilteringMode::Trilinear,
         left.data,
         right.data,
         top.data,

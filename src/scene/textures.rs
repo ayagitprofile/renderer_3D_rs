@@ -16,3 +16,12 @@ pub const TEXTURE_NAME_ARRAY: [&str; 3] = [
     NORMAL_TEXTURE_NAME,
     METALLIC_ROUGHNESS_TEXTURE_NAME,
 ];
+
+#[rustfmt::skip]
+/// Default texture data for when a texture is missing / failed to load
+pub const EMO_TEXTURE_DATA: [[u8; 4]; 4] = [
+    [255, 0, 255, 255],
+    [0,   0, 0,   255],
+    [0,   0, 0,   255],
+    [255, 0, 255, 255]
+];

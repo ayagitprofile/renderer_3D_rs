@@ -48,7 +48,8 @@ impl App {
 
         let (window_size_x, window_size_y) = (self.sdl_window.size().0 as i32, self.sdl_window.size().1 as i32);
 
-        let mut scene_renderer = scene::renderer::Renderer::new((window_size_x as u32, window_size_y as u32));
+        let mut scene_renderer =
+            scene::renderer::Renderer::new((window_size_x as u32, window_size_y as u32), scene_controller.scene());
 
         let mut draw_ui = true;
 
@@ -105,7 +106,8 @@ impl App {
                         sdl2::event::WindowEvent::Resized(..) => {
                             resize_viewport(&self.sdl_window);
                             self.camera.aspect_ratio = get_window_aspect_ratio(&self.sdl_window);
-                            scene_renderer = scene::renderer::Renderer::new(self.sdl_window.size())
+                            scene_renderer =
+                                scene::renderer::Renderer::new(self.sdl_window.size(), scene_controller.scene())
                         }
                         _ => {}
                     },

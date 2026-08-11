@@ -222,8 +222,9 @@ impl Cubemap {
     pub fn load_from_memory(
         width: u32,
         height: u32,
-        storage_format: StorageFormat,
         data_channels: u32,
+        storage_format: StorageFormat,
+        filtering: FilteringMode,
         left: *const u8,
         right: *const u8,
         top: *const u8,
@@ -278,7 +279,7 @@ impl Cubemap {
         }
 
         cubemap.regenerate_mip_maps();
-        cubemap.set_filtering_mode(FilteringMode::Trilinear);
+        cubemap.set_filtering_mode(filtering);
 
         unsafe {
             cubemap.bindless_handle = gl::GetTextureHandleARB(id);

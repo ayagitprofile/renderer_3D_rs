@@ -290,7 +290,7 @@ impl Renderer {
         self.ambient_occlusion.resize(resolution);
     }
 
-    pub fn new(resolution: (u32, u32)) -> Self {
+    pub fn new(resolution: (u32, u32), scene: &Scene) -> Self {
         let depth_prepass_source =
             ShaderSource::load_from_file(std::path::Path::new("assets/shaders/depth_prepass_shader.glsl"));
 
@@ -322,24 +322,28 @@ impl Renderer {
 
         post_process_buffer.set_binding(graphics::buffer::BindingTarget::UniformBuffer, 1);
 
+        let skybox = Skybox::new();
+
+        skybox.shader.map_bindless_texture(
+            skybox
+                .shader
+                .find_uniform_location(super::textures::CUBEMAP_TEXTURE)
+                .unwrap(),
+            scene.cubemap().bindless_handle(),
+        );
+
         let renderer = Renderer {
             current_mat_props: MaterialProperties::DEFAULT,
             opaque_object_draw_call_data: Vec::with_capacity(128),
             transparent_object_draw_call_data: Vec::with_capacity(16),
             depth_prepass_shader: (depth_prepass_source.compile(), *depth_prepass_source.mat_props()),
-            skybox: Skybox::new(),
+            skybox,
             render_targets: render_targets,
             ambient_occlusion: ao,
             post_process_fs_quad: fs_quad,
             post_process_config: pp_config,
             post_process_config_buffer: post_process_buffer,
         };
-
-        graphics::utility::try_set_bindless_texture(
-            &renderer.skybox.shader,
-            "cubemap_texture",
-            renderer.skybox.cubemap.bindless_handle(),
-        );
 
         renderer
     }
@@ -452,7 +456,7 @@ impl Renderer {
         graphics::utility::try_set_bindless_texture(
             shader,
             super::textures::CUBEMAP_TEXTURE,
-            self.skybox.cubemap.bindless_handle(),
+            scene.cubemap().bindless_handle(),
         );
 
         graphics::utility::try_set_bindless_texture(
