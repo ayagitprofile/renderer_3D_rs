@@ -13,12 +13,11 @@ use crate::{
         material_properties::{CullMode, DepthTestMode, MaterialProperties},
         shader::{ComputeShader, Shader},
     },
-    timer::ScopedTimer,
+    timer::{self, ScopedTimer},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShaderParsingTarget {
-    None,
     Vertex,
     Fragment,
     Compute,
@@ -41,16 +40,41 @@ impl ShaderSource {
     }
 
     pub fn compile(&self) -> Shader {
+        let timer = timer::Timer::start("");
+
         let vert_cstr = CStr::from_bytes_with_nul(self.vertex_source.as_bytes()).unwrap();
         let frag_cstr = CStr::from_bytes_with_nul(self.fragment_source.as_bytes()).unwrap();
 
-        Shader::compile_from_c_strings(vert_cstr, frag_cstr)
+        let shader = Shader::compile_from_c_strings(vert_cstr, frag_cstr);
+
+        let elapsed_millis = timer.elapsed().as_millis();
+
+        if elapsed_millis > 250 {
+            println!(
+                "[ShaderSource] shader: {} compilation took: {}",
+                self.name, elapsed_millis
+            );
+        }
+
+        shader
     }
 
     pub fn compile_compute(&self) -> ComputeShader {
+        let timer = timer::Timer::start("");
+
         let compute_cstr = CStr::from_bytes_with_nul(self.compute_source.as_bytes()).unwrap();
 
-        ComputeShader::compile_compute_from_c_string(compute_cstr)
+        let shader = ComputeShader::compile_compute_from_c_string(compute_cstr);
+        let elapsed_millis = timer.elapsed().as_millis();
+
+        if elapsed_millis > 250 {
+            println!(
+                "[ShaderSource] compute shader: {} compilation took: {}",
+                self.name, elapsed_millis
+            );
+        }
+
+        shader
     }
 
     pub fn load_and_compile(file_path: &std::path::Path) -> Shader {
@@ -79,6 +103,25 @@ impl ShaderSource {
         shader
     }
 
+    pub fn insert_line(&mut self, source_target: ShaderParsingTarget, line: &str) {
+        let (target_string, insertion_start) = match source_target {
+            ShaderParsingTarget::Compute => (&mut self.compute_source, ShaderSource::COMPUTE_SHADER_TYPE_MACRO),
+            ShaderParsingTarget::Fragment => (&mut self.fragment_source, ShaderSource::FRAGMENT_SHADER_TYPE_MACRO),
+            ShaderParsingTarget::Vertex => (&mut self.vertex_source, ShaderSource::VERTEX_SHADER_TYPE_MACRO),
+        };
+
+        if let Some(start) = target_string.find(insertion_start) {
+            if let Some(rel_end) = target_string[start..].find('\n') {
+                let end = start + rel_end + 1;
+                target_string.insert_str(end, &format!("{line}\n"));
+            } else {
+                target_string.push('\n');
+                target_string.push_str(line);
+                target_string.push('\n');
+            }
+        }
+    }
+
     pub fn load_from_file(file_path: &std::path::Path) -> ShaderSource {
         let mut file = std::fs::File::open(file_path).expect("Failed to open shader source file");
 
@@ -90,20 +133,20 @@ impl ShaderSource {
         let mut compute_source = String::new();
 
         vertex_source.push_str(ShaderSource::SHADER_VERSION_DIRECTIVE_KV);
-        vertex_source.push_str(ShaderSource::VERTEX_SHADER_TYPE_MACRO);
         vertex_source.push_str(ShaderSource::ENABLE_BINDLESS_TEXTURES_DIRECTIVE);
+        vertex_source.push_str(ShaderSource::VERTEX_SHADER_TYPE_MACRO);
 
         fragment_source.push_str(ShaderSource::SHADER_VERSION_DIRECTIVE_KV);
-        fragment_source.push_str(ShaderSource::FRAGMENT_SHADER_TYPE_MACRO);
         fragment_source.push_str(ShaderSource::ENABLE_BINDLESS_TEXTURES_DIRECTIVE);
+        fragment_source.push_str(ShaderSource::FRAGMENT_SHADER_TYPE_MACRO);
 
         compute_source.push_str(ShaderSource::SHADER_VERSION_DIRECTIVE_KV);
-        compute_source.push_str(ShaderSource::COMPUTE_SHADER_TYPE_MACRO);
         compute_source.push_str(ShaderSource::ENABLE_BINDLESS_TEXTURES_DIRECTIVE);
+        compute_source.push_str(ShaderSource::COMPUTE_SHADER_TYPE_MACRO);
 
         let name = file_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
 
-        let mut current_parsing_target = ShaderParsingTarget::None;
+        let mut current_parsing_target = None;
 
         let mut mat_props = MaterialProperties::DEFAULT;
 
@@ -125,9 +168,7 @@ impl ShaderSource {
                 continue;
             }
 
-            if line.contains(ShaderSource::SHADER_INCLUDE_DIRECTIVE)
-                && current_parsing_target != ShaderParsingTarget::None
-            {
+            if line.contains(ShaderSource::SHADER_INCLUDE_DIRECTIVE) && current_parsing_target.is_some() {
                 let include_path_str = Self::extract_directive_value(Self::SHADER_INCLUDE_DIRECTIVE, line)
                     .unwrap()
                     .trim_matches('"');
@@ -153,8 +194,10 @@ impl ShaderSource {
                     }
                 };
 
-                if let Some(include_string) = include_string {
-                    match current_parsing_target {
+                if let Some(include_string) = include_string
+                    && let Some(target) = current_parsing_target
+                {
+                    match target {
                         ShaderParsingTarget::Fragment => {
                             fragment_source.push_str(&include_string);
                             fragment_source.push('\n');
@@ -167,7 +210,6 @@ impl ShaderSource {
                             compute_source.push_str(&include_string);
                             compute_source.push('\n');
                         }
-                        ShaderParsingTarget::None => {}
                     }
                 }
 
@@ -196,19 +238,20 @@ impl ShaderSource {
                 }
             }
 
-            match current_parsing_target {
-                ShaderParsingTarget::None => continue,
-                ShaderParsingTarget::Fragment => {
-                    fragment_source.push_str(line);
-                    fragment_source.push('\n');
-                }
-                ShaderParsingTarget::Vertex => {
-                    vertex_source.push_str(line);
-                    vertex_source.push('\n');
-                }
-                ShaderParsingTarget::Compute => {
-                    compute_source.push_str(line);
-                    compute_source.push('\n');
+            if let Some(target) = current_parsing_target {
+                match target {
+                    ShaderParsingTarget::Fragment => {
+                        fragment_source.push_str(line);
+                        fragment_source.push('\n');
+                    }
+                    ShaderParsingTarget::Vertex => {
+                        vertex_source.push_str(line);
+                        vertex_source.push('\n');
+                    }
+                    ShaderParsingTarget::Compute => {
+                        compute_source.push_str(line);
+                        compute_source.push('\n');
+                    }
                 }
             }
         }
@@ -285,18 +328,18 @@ impl ShaderSource {
         MaterialProperties::DEFAULT.cull_mode
     }
 
-    fn extract_shader_type(line: &str) -> ShaderParsingTarget {
+    fn extract_shader_type(line: &str) -> Option<ShaderParsingTarget> {
         match ShaderSource::extract_directive_value(ShaderSource::SHADER_TYPE_DIRECTIVE, line)
             .expect("Failed to parse shader type directive")
             .to_lowercase()
             .as_str()
         {
-            "vertex" | "vert" => ShaderParsingTarget::Vertex,
-            "fragment" | "frag" | "pixel" => ShaderParsingTarget::Fragment,
-            "compute" => ShaderParsingTarget::Compute,
+            "vertex" | "vert" => Some(ShaderParsingTarget::Vertex),
+            "fragment" | "frag" | "pixel" => Some(ShaderParsingTarget::Fragment),
+            "compute" => Some(ShaderParsingTarget::Compute),
             _ => {
                 println!("[ShaderSource] Warning: ignored unknown shader type: {}", line);
-                ShaderParsingTarget::None
+                None
             }
         }
     }

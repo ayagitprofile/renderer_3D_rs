@@ -15,7 +15,7 @@ use crate::{
     graphics::{self},
     input,
     scene::{self, light::LightType, scene_controller::SceneController, value_range},
-    shader_data,
+    shader_data, timer,
     transform::Transform,
 };
 
@@ -23,14 +23,9 @@ static OPENGL_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 impl App {
     pub fn run(&mut self) {
-        let mut shader_data = shader_data::GlobalShaderData::new();
+        let load_timer = timer::Timer::start("");
 
-        // let light_data = LightDataBuffer::new(&[
-        //     LightData::new_directional_light((-glam::Vec3::ONE.normalize()).to_array(), Vec3::ONE.to_array(), 1.9f32),
-        //     LightData::new_point_light([3f32, 1f32, -1f32], [0f32, 0f32, 1f32], 3f32, 10f32),
-        //     LightData::new_point_light([-3f32, 1f32, 1f32], [1f32, 0f32, 0f32], 3f32, 10f32),
-        //     LightData::new_point_light([-2f32, 1f32, -3f32], [0f32, 1f32, 0f32], 3f32, 10f32),
-        // ]);
+        let mut shader_data = shader_data::GlobalShaderData::new();
 
         self.camera
             .transform
@@ -50,6 +45,8 @@ impl App {
         let mut draw_gizmos = true;
 
         let gizmo_renderer = DebugGizmoRenderer::new();
+
+        println!("Loading took: {} ms", load_timer.elapsed().as_millis());
 
         'main_loop: loop {
             if let Some(error) = OPENGL_ERROR.get().and_then(|m| m.lock().unwrap().take()) {
@@ -189,18 +186,12 @@ impl App {
                 }
             }
 
-            self.imgui_sdl_platform
-                .prepare_frame(&mut self.imgui_context, &self.sdl_window, &self.sdl_event_pump);
-
-            let ui = self.imgui_context.new_frame();
-
-            ui.window("dummy window")
-                .size([100f32, 100f32], imgui::Condition::Always)
-                .title_bar(false)
-                .position([-1000f32, -1000f32], imgui::Condition::Always)
-                .build(|| {});
-
             if draw_ui {
+                self.imgui_sdl_platform
+                    .prepare_frame(&mut self.imgui_context, &self.sdl_window, &self.sdl_event_pump);
+
+                let ui = self.imgui_context.new_frame();
+
                 ui.window("Window")
                     .size([120f32, 80f32], imgui::Condition::Appearing)
                     .always_auto_resize(true)
@@ -208,7 +199,7 @@ impl App {
                     .scrollable(false)
                     .scroll_bar(false)
                     .title_bar(false)
-                    .position([0f32, 0f32], imgui::Condition::Appearing)
+                    .position([0f32, 0f32], imgui::Condition::FirstUseEver)
                     .build(|| {
                         if ui.collapsing_header("Rendering stats", TreeNodeFlags::DEFAULT_OPEN) {
                             ui.text(format!(
@@ -270,9 +261,9 @@ impl App {
                         }
                         scene_controller.draw_ui(ui);
                     });
-            }
 
-            self.imgui_opengl_renderer.render(&mut self.imgui_context);
+                self.imgui_opengl_renderer.render(&mut self.imgui_context);
+            }
 
             self.sdl_window.gl_swap_window();
         }

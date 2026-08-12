@@ -309,14 +309,46 @@ impl Scene {
 
         let material_id = self.resolve_imported_material(&gltf_material, discovered_materials, images);
 
-        let min = primitive.bounding_box().min;
-        let max = primitive.bounding_box().max;
+        let node_id = self.add_node(Node::new(
+            transform,
+            children,
+            mesh_id,
+            material_id,
+            Scene::aabb_from_gltf_bounding_box(&primitive.bounding_box()),
+        ));
+
+        node_id
+    }
+
+    fn aabb_from_gltf_bounding_box(bb: &gltf::mesh::BoundingBox) -> AABB {
+        // to prevent flat planes from being incorrectly culled
+        const MIN_AABB_AXIS_SIZE: f32 = 0.1f32;
+
+        let mut min = bb.min;
+        let mut max = bb.max;
+
+        let dif_x = max[0] - min[0];
+        let dif_y = max[1] - min[1];
+        let dif_z = max[2] - min[2];
+
+        if dif_x < MIN_AABB_AXIS_SIZE {
+            min[0] += MIN_AABB_AXIS_SIZE * 0.5f32;
+            max[0] += MIN_AABB_AXIS_SIZE * 0.5f32;
+        }
+
+        if dif_y < MIN_AABB_AXIS_SIZE {
+            min[1] += MIN_AABB_AXIS_SIZE * 0.5f32;
+            max[1] += MIN_AABB_AXIS_SIZE * 0.5f32;
+        }
+
+        if dif_z < MIN_AABB_AXIS_SIZE {
+            min[2] += MIN_AABB_AXIS_SIZE * 0.5f32;
+            max[2] += MIN_AABB_AXIS_SIZE * 0.5f32;
+        }
 
         let aabb_lhs = AABB::new([min[0], min[1], -max[2]], [max[0], max[1], -min[2]]);
 
-        let node_id = self.add_node(Node::new(transform, children, mesh_id, material_id, aabb_lhs));
-
-        node_id
+        aabb_lhs
     }
 
     fn resolve_imported_material(

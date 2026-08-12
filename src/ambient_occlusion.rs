@@ -11,8 +11,10 @@ use crate::{
     },
     scene,
     shader_source::ShaderSource,
-    timer,
 };
+
+const COMPUTE_THREADS_PER_WORK_GROUP_X: u32 = 16;
+const COMPUTE_THREADS_PER_WORK_GROUP_Y: u32 = 16;
 
 const KERNEL_SAMPLE_COUNT: usize = 32;
 const RANDOM_DIRECTION_TEXTURE_WIDTH: usize = 8;
@@ -91,9 +93,6 @@ impl AmbientOcclusion {
             .set_binding(graphics::buffer::BindingTarget::UniformBuffer, 0);
 
         self.uniform_data_buffer.upload_data(&[uniform_data]);
-
-        const COMPUTE_THREADS_PER_WORK_GROUP_X: u32 = 16;
-        const COMPUTE_THREADS_PER_WORK_GROUP_Y: u32 = 16;
 
         let (texture_width, texture_height) = (self.output_texture.width() as u32, self.output_texture.height() as u32);
 
@@ -223,15 +222,14 @@ impl AmbientOcclusion {
     }
 
     pub fn new(texture_width: u32, texture_height: u32) -> Self {
-        let mut timer = timer::Timer::start("");
+        let mut ao_source = ShaderSource::load_from_file(std::path::Path::new("assets/shaders/ao_compute_shader.glsl"));
 
-        let ao_source = ShaderSource::load_from_file(std::path::Path::new("assets/shaders/ao_compute_shader.glsl"));
-
-        println!("SSAO compute loading took: {} ms", timer.reset().as_millis());
+        ao_source.insert_line(
+            crate::shader_source::ShaderParsingTarget::Compute,
+            &format!("layout(local_size_x = {COMPUTE_THREADS_PER_WORK_GROUP_X}, local_size_y = {COMPUTE_THREADS_PER_WORK_GROUP_Y}) in;"),
+        );
 
         let ao_compute_shader = ao_source.compile_compute();
-
-        println!("SSAO compute compilation took: {} ms", timer.reset().as_millis());
 
         let ao_blur_shader =
             ShaderSource::load_from_file(std::path::Path::new("assets/shaders/ao_blur_shader.glsl")).compile_compute();
