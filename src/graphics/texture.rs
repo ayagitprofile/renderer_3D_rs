@@ -31,11 +31,11 @@ pub enum StorageFormat {
     RGB16F = gl::RGB16F,
     RGBA16F = gl::RGBA16F,
 
-    Depth16F = gl::DEPTH_COMPONENT16,
-    Depth24F = gl::DEPTH_COMPONENT24,
-    Depth32F = gl::DEPTH_COMPONENT32,
+    Depth16 = gl::DEPTH_COMPONENT16,
+    Depth24 = gl::DEPTH_COMPONENT24,
+    Depth32 = gl::DEPTH_COMPONENT32,
 
-    Depth24FStencil = gl::DEPTH24_STENCIL8,
+    Depth24Stencil = gl::DEPTH24_STENCIL8,
     Depth32FStencil = gl::DEPTH32F_STENCIL8,
 }
 
@@ -56,14 +56,14 @@ impl PixelDataType {
 impl StorageFormat {
     pub fn is_depth_format(&self) -> bool {
         match self {
-            StorageFormat::Depth16F | StorageFormat::Depth24F | StorageFormat::Depth32F => true,
+            StorageFormat::Depth16 | StorageFormat::Depth24 | StorageFormat::Depth32 => true,
             _ => false,
         }
     }
 
-    pub fn is_depth_stencil_fromat(&self) -> bool {
+    pub fn is_depth_stencil_format(&self) -> bool {
         match self {
-            StorageFormat::Depth24FStencil | StorageFormat::Depth32FStencil => true,
+            StorageFormat::Depth24Stencil | StorageFormat::Depth32FStencil => true,
             _ => false,
         }
     }
@@ -75,6 +75,11 @@ impl StorageFormat {
 
 pub trait Texture {
     fn clear(&self, color: [f32; 4]) {
+        assert!(
+            (self.storage_format().is_depth_format() || self.storage_format().is_depth_stencil_format()) == false,
+            "Call clear only on non depth/stencil textures"
+        );
+
         unsafe {
             gl::ClearTexImage(
                 self.id(),
@@ -85,6 +90,8 @@ pub trait Texture {
             );
         }
     }
+
+    fn storage_format(&self) -> StorageFormat;
 
     fn set_filtering_mode(&self, filtering: FilteringMode) {
         debug_assert!(
@@ -164,10 +171,15 @@ pub struct Texture2D {
 
 pub struct Cubemap {
     id: u32,
+    storage_format: StorageFormat,
     bindless_handle: u64,
 }
 
 impl Texture for Texture2D {
+    fn storage_format(&self) -> StorageFormat {
+        self.storage_format
+    }
+
     fn id(&self) -> u32 {
         self.id
     }
@@ -178,6 +190,10 @@ impl Texture for Texture2D {
 }
 
 impl Texture for Cubemap {
+    fn storage_format(&self) -> StorageFormat {
+        self.storage_format
+    }
+
     fn id(&self) -> u32 {
         self.id
     }
@@ -283,6 +299,7 @@ impl Cubemap {
 
         let mut cubemap = Cubemap {
             id: id,
+            storage_format,
             bindless_handle: 0,
         };
 
@@ -306,10 +323,6 @@ impl Cubemap {
 }
 
 impl Texture2D {
-    pub fn storage_format(&self) -> StorageFormat {
-        self.storage_format
-    }
-
     pub fn width(&self) -> i32 {
         self.width
     }

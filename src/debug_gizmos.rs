@@ -53,7 +53,7 @@ impl DebugGizmoRenderer {
         }
     }
 
-    pub fn render_directional_light(&self, color: Vec3, direction: Vec3) {
+    pub fn render_directional_light(&self, color: Vec3, direction: Vec3, camera_position: Vec3) {
         let shader = &self.shader.0;
         graphics::utility::apply_mat_props(&self.shader.1);
 
@@ -62,13 +62,45 @@ impl DebugGizmoRenderer {
             &[color.x, color.y, color.z, 0.5f32],
         );
 
-        shader.bind();
         {
-            let mat = Mat4::from_scale_rotation_translation(Vec3::ONE * 0.5f32, Quat::IDENTITY, Vec3::ZERO);
+            let mut transform = Transform::from_model_matrix(Mat4::from_scale_rotation_translation(
+                vec3(0.1f32, 0.1f32, 12.5f32),
+                Quat::IDENTITY,
+                -6.25f32 * direction,
+            ));
+
+            transform.look_at(direction);
 
             shader.set_uniform_mat4(
                 shader.find_uniform_location("u_model_matrix").unwrap(),
-                &mat.to_cols_array(),
+                &transform.model_matrix().to_cols_array(),
+            );
+
+            self.cylinder_mesh.vao().bind();
+
+            unsafe {
+                gl::DrawElements(
+                    gl::TRIANGLES,
+                    self.sun_mesh.index_count(),
+                    self.sun_mesh.index_format().to_gl_format(),
+                    std::ptr::null(),
+                );
+            }
+        }
+
+        shader.bind();
+        {
+            let mut transform = Transform::from_model_matrix(Mat4::from_scale_rotation_translation(
+                Vec3::ONE * 0.5f32,
+                Quat::IDENTITY,
+                Vec3::ZERO,
+            ));
+
+            transform.look_at(camera_position);
+
+            shader.set_uniform_mat4(
+                shader.find_uniform_location("u_model_matrix").unwrap(),
+                &transform.model_matrix().to_cols_array(),
             );
 
             self.sun_mesh.vao().bind();
@@ -86,13 +118,20 @@ impl DebugGizmoRenderer {
         }
 
         {
-            let q = Quat::look_to_lh(direction.reflect(Transform::FORWARD).normalize(), Transform::UP);
+            let color = [0.25f32, 0.25f32, 0.25f32, 0.5f32];
+            shader.set_uniform_vec4(shader.find_uniform_location("u_color").unwrap(), &color);
 
-            let mat = Mat4::from_scale_rotation_translation(vec3(0.1f32, 0.1f32, 25f32), q, Vec3::ZERO);
+            let mut transform = Transform::from_model_matrix(Mat4::from_scale_rotation_translation(
+                vec3(0.1f32, 0.1f32, 12.5f32),
+                Quat::IDENTITY,
+                6.25f32 * direction,
+            ));
+
+            transform.look_at(direction);
 
             shader.set_uniform_mat4(
                 shader.find_uniform_location("u_model_matrix").unwrap(),
-                &mat.to_cols_array(),
+                &transform.model_matrix().to_cols_array(),
             );
 
             self.cylinder_mesh.vao().bind();
@@ -113,11 +152,11 @@ impl DebugGizmoRenderer {
 
         graphics::utility::apply_mat_props(&self.shader.1);
 
-        let mat = Mat4::from_scale_rotation_translation(scale, Quat::IDENTITY, position);
+        let transform = Transform::from_position_and_scale(position, scale);
 
         shader.set_uniform_mat4(
             shader.find_uniform_location("u_model_matrix").unwrap(),
-            &mat.to_cols_array(),
+            &transform.model_matrix().to_cols_array(),
         );
 
         shader.set_uniform_vec4(

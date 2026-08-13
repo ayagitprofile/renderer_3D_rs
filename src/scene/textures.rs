@@ -7,6 +7,8 @@ pub const FRAMEBUFFER_COLOR_TEXTURE: &str = "fb_color_texture";
 pub const FRAMEBUFFER_DEPTH_TEXTURE: &str = "fb_depth_texture";
 pub const FRAMEBUFFER_NORMAL_TEXTURE: &str = "fb_normal_texture";
 
+pub const SHADOW_MAP: &str = "shadow_map";
+
 pub const CUBEMAP_TEXTURE: &str = "cubemap_texture";
 
 pub const AO_TEXTURE: &str = "ao_texture";

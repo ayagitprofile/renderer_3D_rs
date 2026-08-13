@@ -809,6 +809,10 @@ impl Scene {
     pub fn root_nodes(&self) -> &[NodeID] {
         self.node_roots.as_slice()
     }
+
+    pub fn nodes(&self) -> &[Node] {
+        self.nodes.as_slice()
+    }
 }
 
 fn transform_from_node(node: &gltf::Node) -> Transform {

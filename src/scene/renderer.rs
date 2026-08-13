@@ -1,17 +1,19 @@
-use glam::{Mat3, Mat4, Vec3, Vec4};
+use glam::{Mat3, Mat4, Vec3, Vec4, Vec4Swizzles};
 
 use super::{data, scene::Scene};
 use crate::ambient_occlusion::AmbientOcclusion;
 use crate::camera::Camera;
 use crate::graphics::buffer::GraphicsBuffer;
 use crate::graphics::framebuffer::Framebuffer;
-use crate::graphics::material_properties::{MaterialProperties, SurfaceType};
+use crate::graphics::material_properties::{MaterialProperties, ShadowCasting, SurfaceType};
 use crate::graphics::mesh::Mesh;
 use crate::graphics::shader::Shader;
 use crate::graphics::texture::{self, Texture, Texture2D};
+use crate::scene::light::LightType;
 use crate::scene::skybox::Skybox;
 use crate::scene::value_range::{self, ValueRange};
 use crate::shader_source::ShaderSource;
+use crate::transform::Transform;
 use crate::{ambient_occlusion, gl, graphics, timer};
 
 const SHADER_MODEL_MATRIX_UNIFORM_NAME: &str = "u_model_matrix";
@@ -34,6 +36,10 @@ pub struct Renderer {
     post_process_config: PostProcessingConfig,
 
     post_process_config_buffer: GraphicsBuffer,
+
+    shadow_casters: Vec<DrawCallData>,
+    shadow_caster_ls_matrix: Option<Mat4>,
+    shadow_caster_shader: Shader,
 }
 
 #[repr(C)]
@@ -59,17 +65,11 @@ pub struct PostProcessingConfig {
 }
 
 struct RenderTargets {
-    // framebuffer: Framebuffer,
-
-    // color_texture: texture::Texture2D,
-    // depth_texture: texture::Texture2D,
-    // normal_texture: texture::Texture2D,
-
-    // shadow_pass_framebuffer: Framebuffer,
-    // shadow_map: texture::Texture2D,
     render_framebuffer: Framebuffer,
+    shadow_framebuffer: Framebuffer,
 }
 
+#[derive(Clone, Copy)]
 struct DrawCallData {
     object_to_world: Mat4,
     world_center: Vec3,
@@ -92,6 +92,30 @@ impl AABBVec3 {
     fn new(min: Vec3, max: Vec3) -> Self {
         Self { min, max }
     }
+}
+
+fn clip_space_to_world_space(position_cs: Vec3, inverse_view_projection: &Mat4) -> Vec3 {
+    let p = inverse_view_projection * Vec4::new(position_cs.x, position_cs.y, position_cs.z, 1.0f32);
+    p.xyz() / p.w
+}
+
+fn camera_frustum_corners_ws(camera_vp_matrix: &Mat4) -> [Vec3; 8] {
+    let inverse_vp = camera_vp_matrix.inverse();
+
+    #[rustfmt::skip]
+    let corners = [
+        clip_space_to_world_space(Vec3::new(-1f32, -1f32, -1f32), &inverse_vp), // near BL
+        clip_space_to_world_space(Vec3::new( 1f32, -1f32, -1f32), &inverse_vp), // near BR
+        clip_space_to_world_space(Vec3::new(-1f32,  1f32, -1f32), &inverse_vp), // near TL
+        clip_space_to_world_space(Vec3::new( 1f32,  1f32, -1f32), &inverse_vp), // near TR
+
+        clip_space_to_world_space(Vec3::new(-1f32, -1f32,  1f32), &inverse_vp), // far BL
+        clip_space_to_world_space(Vec3::new( 1f32, -1f32,  1f32), &inverse_vp), // far BR
+        clip_space_to_world_space(Vec3::new(-1f32,  1f32,  1f32), &inverse_vp), // far TL
+        clip_space_to_world_space(Vec3::new( 1f32,  1f32,  1f32), &inverse_vp), // far TR
+    ];
+
+    corners
 }
 
 struct Plane {
@@ -183,6 +207,31 @@ fn transform_aabb(aabb: AABBVec3, world: &Mat4) -> (AABBVec3, Vec3) {
     )
 }
 
+fn get_light_direction_axes(light_forward: Vec3) -> (Vec3, Vec3, Vec3) {
+    let forward = light_forward.normalize();
+
+    let up_ref = if Transform::UP.dot(forward).abs() > 0.99f32 {
+        Transform::RIGHT
+    } else {
+        Transform::UP
+    };
+
+    let right = up_ref.cross(forward).normalize();
+    let up = forward.cross(right);
+
+    (right, up, forward)
+}
+
+fn center_of_points(points: &[Vec3]) -> Vec3 {
+    let mut center = Vec3::ZERO;
+
+    for p in points {
+        center += p;
+    }
+
+    center / points.len() as f32
+}
+
 impl Renderer {
     pub fn post_processing_config_mut(&mut self) -> &mut PostProcessingConfig {
         &mut self.post_process_config
@@ -193,15 +242,32 @@ impl Renderer {
 
         self.opaque_object_draw_call_data.clear();
         self.transparent_object_draw_call_data.clear();
+        self.shadow_casters.clear();
 
         let camera_frustum =
             CameraFrustum::from_view_projection_matrix(camera.projection_matrix() * camera.view_matrix());
 
-        let mut total_objects = 0;
+        if let Some(directinal_light) = scene
+            .lights
+            .lights()
+            .iter()
+            .find(|light| light.type_of_light == LightType::Directional)
+        {
+            let light_forward = Vec3::from_array(directinal_light.direction).normalize();
+
+            let (width, height) = (10f32, 10f32);
+            let (half_width, half_height) = (width * 0.5f32, height * 0.5f32);
+
+            let view_mat = Camera::calculate_view_matrix(light_forward * -10f32, light_forward);
+            let proj_mat =
+                glam::Mat4::orthographic_rh_gl(-half_width, half_width, -half_height, half_height, 0.1f32, 100f32);
+
+            self.shadow_caster_ls_matrix = Some(proj_mat * view_mat);
+        } else {
+            self.shadow_caster_ls_matrix = None;
+        }
 
         for root_node_id in scene.root_node_iter() {
-            total_objects += 1;
-
             let root_node = scene.get_node(*root_node_id);
 
             let object_to_world = *root_node.transform.model_matrix();
@@ -210,22 +276,22 @@ impl Renderer {
 
             let material = scene.get_material(root_node.material_id);
 
+            let draw_call_data = DrawCallData::new(*root_node_id, &object_to_world, center);
+
+            // || true is for testing only
+            if material.material_properties.shadow_casting != ShadowCasting::Disabled || true {
+                self.shadow_casters.push(draw_call_data);
+            }
+
             if camera_frustum.intersects_aabb(&aabb) {
                 if material.material_properties.surface_type == SurfaceType::Opaque {
-                    self.opaque_object_draw_call_data
-                        .push(DrawCallData::new(*root_node_id, &object_to_world, center));
+                    self.opaque_object_draw_call_data.push(draw_call_data);
                 } else {
-                    self.transparent_object_draw_call_data.push(DrawCallData::new(
-                        *root_node_id,
-                        &object_to_world,
-                        center,
-                    ));
+                    self.transparent_object_draw_call_data.push(draw_call_data);
                 }
             }
 
             for child_id in root_node.children_iter() {
-                total_objects += 1;
-
                 let child_node = scene.get_node(*child_id);
                 let child_object_to_world = root_node.transform.model_matrix() * child_node.transform.model_matrix();
 
@@ -276,7 +342,7 @@ impl Renderer {
         });
 
         RenderingStats {
-            total_objects: total_objects,
+            total_objects: scene.nodes().len() as u32,
             visible_objects: (self.opaque_object_draw_call_data.len() + self.transparent_object_draw_call_data.len())
                 as u32,
             frame_data_preparation_time: timer.elapsed(),
@@ -284,7 +350,8 @@ impl Renderer {
     }
 
     fn calculate_ssao_resolution(resolution: (u32, u32)) -> (u32, u32) {
-        (resolution.0 * 3 / 4, resolution.1 * 3 / 4)
+        // (resolution.0 * 3 / 4, resolution.1 * 3 / 4)
+        (resolution.0 / 2, resolution.1 / 2)
     }
 
     pub fn resize(&mut self, resolution: (u32, u32)) {
@@ -338,8 +405,11 @@ impl Renderer {
 
         let renderer = Renderer {
             current_mat_props: MaterialProperties::DEFAULT,
+
             opaque_object_draw_call_data: Vec::with_capacity(128),
             transparent_object_draw_call_data: Vec::with_capacity(16),
+            shadow_casters: Vec::with_capacity(32),
+
             depth_prepass_shader: (depth_prepass_source.compile(), *depth_prepass_source.mat_props()),
             skybox,
             render_targets: render_targets,
@@ -347,12 +417,70 @@ impl Renderer {
             post_process_fs_quad: fs_quad,
             post_process_config: pp_config,
             post_process_config_buffer: post_process_buffer,
+
+            shadow_caster_ls_matrix: None,
+
+            shadow_caster_shader: ShaderSource::load_from_file(std::path::Path::new(
+                "assets/shaders/scene_shadow_caster_shader.glsl",
+            ))
+            .compile(),
         };
 
         renderer
     }
 
+    pub fn render_shadow_pass(&self, scene: &Scene) {
+        if self.shadow_caster_ls_matrix.is_none() {
+            return;
+        }
+
+        self.render_targets.shadow_framebuffer.bind();
+        self.render_targets.shadow_framebuffer.clear_depth_attachment();
+
+        let shader = &self.shadow_caster_shader;
+
+        shader.bind();
+
+        graphics::utility::set_cull_mode(graphics::material_properties::CullMode::Disabled);
+        graphics::utility::set_depth_test_mode(graphics::material_properties::DepthTestMode::LessEqual);
+        graphics::utility::set_depth_writing(true);
+
+        unsafe {
+            gl::Disable(gl::BLEND);
+        }
+
+        let model_matrix_uniform_location = shader.find_uniform_location("u_model_matrix").unwrap();
+
+        // let vp_matrix = shadow_camera.projection_matrix() * shadow_camera.view_matrix();
+
+        shader.set_uniform_mat4(
+            shader.find_uniform_location("u_light_vp_matrix").unwrap(),
+            &self.shadow_caster_ls_matrix.unwrap().to_cols_array(),
+        );
+
+        for data in self.shadow_casters.iter() {
+            let node = scene.get_node(data.node_id);
+            let mesh = scene.get_mesh(node.mesh_id);
+
+            mesh.vao().bind();
+
+            shader.set_uniform_mat4(model_matrix_uniform_location, &data.object_to_world.to_cols_array());
+
+            unsafe {
+                gl::DrawElements(
+                    gl::TRIANGLES,
+                    mesh.index_count(),
+                    mesh.index_format().to_gl_format(),
+                    std::ptr::null(),
+                );
+            }
+        }
+    }
+
     pub fn render_depth_prepass(&self, scene: &Scene) {
+        self.render_targets.render_framebuffer.bind();
+        self.render_targets.render_framebuffer.clear_depth_attachment();
+
         self.render_targets
             .render_framebuffer
             .set_active_render_target(RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
@@ -388,6 +516,8 @@ impl Renderer {
     }
 
     pub fn render_forward_lighting(&mut self, scene: &Scene) {
+        self.render_targets.render_framebuffer.bind();
+
         self.render_targets
             .render_framebuffer
             .set_active_render_target(RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
@@ -413,6 +543,16 @@ impl Renderer {
         let gpu_pp_config = GPUPostProcessConfig::from_cpu_config(&self.post_process_config);
 
         self.post_process_config_buffer.upload_data(&[gpu_pp_config]);
+
+        graphics::utility::try_set_bindless_texture(
+            &self.post_process_fs_quad.shader,
+            "shadow_map",
+            self.render_targets
+                .shadow_framebuffer
+                .depth_attachment()
+                .unwrap()
+                .bindless_handle(),
+        );
 
         self.post_process_fs_quad.render();
     }
@@ -469,7 +609,21 @@ impl Renderer {
             self.ambient_occlusion.ao_compute_result_texture().bindless_handle(),
         );
 
+        graphics::utility::try_set_bindless_texture(
+            shader,
+            super::textures::SHADOW_MAP,
+            self.render_targets
+                .shadow_framebuffer
+                .depth_attachment()
+                .unwrap()
+                .bindless_handle(),
+        );
+
         Renderer::upload_model_matrix(shader, model_matrix);
+
+        if let Some(location) = shader.find_uniform_location("u_light_vp_matrix") {
+            shader.set_uniform_mat4(location, &self.shadow_caster_ls_matrix.unwrap().to_cols_array());
+        }
 
         self.render_mesh(mesh, shader, &material.material_properties);
     }
@@ -478,11 +632,6 @@ impl Renderer {
         if let Some(location) = shader.find_uniform_location(SHADER_MODEL_MATRIX_UNIFORM_NAME) {
             shader.set_uniform_mat4(location, &model_matrix.to_cols_array());
         }
-    }
-
-    pub fn new_frame(&self) {
-        self.render_targets.render_framebuffer.clear_depth_attachment();
-        self.render_targets.render_framebuffer.bind();
     }
 
     pub fn ssao_mut(&mut self) -> &mut AmbientOcclusion {
@@ -517,7 +666,7 @@ impl RenderTargets {
     pub fn new(resolution: (u32, u32)) -> Self {
         let mut render_framebuffer = Framebuffer::new(resolution);
 
-        render_framebuffer.create_depth_attachment(texture::StorageFormat::Depth24F);
+        render_framebuffer.create_depth_attachment(texture::StorageFormat::Depth24);
         render_framebuffer.create_color_attachment(
             RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX,
             texture::StorageFormat::SRGBA,
@@ -529,6 +678,13 @@ impl RenderTargets {
             texture::FilteringMode::Nearest,
         );
 
-        Self { render_framebuffer }
+        let mut shadow_framebuffer = Framebuffer::new(resolution);
+
+        shadow_framebuffer.create_depth_attachment(texture::StorageFormat::Depth32);
+
+        Self {
+            render_framebuffer,
+            shadow_framebuffer,
+        }
     }
 }

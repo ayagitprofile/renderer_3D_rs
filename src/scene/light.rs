@@ -1,5 +1,5 @@
 #[repr(u32)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LightType {
     Directional = 0,
     Point = 1,

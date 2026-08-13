@@ -158,8 +158,8 @@ impl App {
             let rendering_stats = scene_renderer.prepare_rendering_data(scene, &self.camera);
             graphics::utility::poll_error("Render prep");
 
-            scene_renderer.new_frame();
-            graphics::utility::poll_error("New frame");
+            scene_renderer.render_shadow_pass(scene);
+            graphics::utility::poll_error("Shadow pass");
 
             scene_renderer.render_depth_prepass(scene);
             graphics::utility::poll_error("Depth prepass");
@@ -180,12 +180,13 @@ impl App {
                             gizmo_renderer.render_directional_light(
                                 Vec3::from_array(light.color),
                                 Vec3::from_array(light.direction),
+                                self.camera.transform.position(),
                             );
                         }
                         LightType::Point => {
                             gizmo_renderer.render_lightbulb(
                                 Vec3::from_array(light.position),
-                                vec3(0.3, 0.3, 0.3),
+                                vec3(0.2, 0.2, 0.2),
                                 Vec3::from_array(light.color),
                             );
                         }
@@ -361,7 +362,12 @@ impl App {
             time_last_frame: now,
             time_on_app_startup: now,
             input_container: input::InputContainer::new(),
-            camera: camera::Camera::new_perspective_camera(90f32, window_aspect_ratio, [0.1f32, 100f32]),
+            camera: camera::Camera::new_perspective_camera(
+                &Transform::identity(),
+                90f32,
+                window_aspect_ratio,
+                [0.1f32, 100f32],
+            ),
         }
     }
 

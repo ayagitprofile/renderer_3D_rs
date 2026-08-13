@@ -5,7 +5,9 @@
 #include "core_uniforms.glsl"
 
 uniform sampler2D fb_normal_texture;
+uniform mat4 u_light_vp_matrix;
 
+out vec4 v_position_light_space;
 out vec3 v_position_ws;
 out vec2 v_uv;
 out mat3 v_TBN;
@@ -46,6 +48,7 @@ void main() {
     v_TBN = TBN;
     v_uv = a_uv;
     v_position_ws = position_ws.xyz;
+    v_position_light_space = u_light_vp_matrix * position_ws;
 }
 
 #shader frag
@@ -412,10 +415,25 @@ vec3 calculate_IBL(
     return diffuse_ibl + specular_ibl;
 }
 
+uniform sampler2D shadow_map;
+
+float sample_shadow_map(vec4 position_light_space) {
+    // perspective division and remapping from [-1;1] to [0;1]
+    vec3 proj_coords = (position_light_space.xyz / position_light_space.w) * 0.5 + 0.5;
+
+    // closest depth to light source
+    float closest_depth = texture(shadow_map, proj_coords.xy).r;
+
+    float current_depth = proj_coords.z;
+
+    return current_depth > closest_depth ? 1.0 : 0.0;
+}
+
 layout (location = 0) out vec4 out_color;
 
 uniform sampler2D ao_texture;
 
+in vec4 v_position_light_space;
 in vec3 v_position_ws;
 in vec2 v_uv;
 in mat3 v_TBN;
@@ -442,6 +460,8 @@ void main() {
 
     vec3 direct_light = vec3(0);
 
+    float dir_light_shadow = sample_shadow_map(v_position_light_space);
+
     for (uint i = 0; i < CORE_LIGHT_COUNT; i++) {
         Core_Light light = CORE_LIGHT_ARRAY[i];
 
@@ -449,7 +469,7 @@ void main() {
 
         switch (light_type) {
             case CORE_LIGHT_TYPE_DIRECTIONAL: {
-                direct_light += calculate_directional_light(light, N, V, albedo, metallic, roughness, F0);
+                direct_light += (1.0 - dir_light_shadow) * calculate_directional_light(light, N, V, albedo, metallic, roughness, F0);
             } break;
 
             case CORE_LIGHT_TYPE_POINT: {

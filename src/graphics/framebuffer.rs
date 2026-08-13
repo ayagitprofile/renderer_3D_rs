@@ -19,6 +19,10 @@ pub struct Framebuffer {
 impl Framebuffer {
     pub const MAX_NUM_OF_COLOR_ATTACHMENTS: usize = 10;
 
+    pub fn resolution(&self) -> (u32, u32) {
+        (self.res_x, self.res_y)
+    }
+
     pub fn set_active_render_target(&self, render_target_index: usize) {
         assert!(self.is_complete());
 
@@ -131,6 +135,7 @@ impl Framebuffer {
     pub fn bind(&self) {
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, self.id);
+            gl::Viewport(0, 0, self.res_x as i32, self.res_y as i32);
         }
     }
 }

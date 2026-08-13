@@ -1,5 +1,5 @@
 #![allow(dead_code, unused)]
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 
 #[derive(Clone, Copy)]
 pub struct Transform {
@@ -24,6 +24,32 @@ impl Transform {
             model_matrix: model_matrix,
             rotation: model_matrix.to_scale_rotation_translation().1,
         }
+    }
+
+    pub fn from_position_and_scale(position: Vec3, scale: Vec3) -> Self {
+        Self {
+            model_matrix: Mat4::from_scale_rotation_translation(scale, Quat::IDENTITY, position),
+            rotation: Quat::IDENTITY,
+        }
+    }
+
+    pub fn set_forward(&mut self, forward: Vec3) {
+        let forward = forward.normalize();
+
+        let reference_up = if forward.dot(Transform::UP).abs() > 0.999 {
+            Transform::FORWARD
+        } else {
+            Transform::UP
+        };
+
+        let right = reference_up.cross(forward).normalize();
+        let up = forward.cross(right).normalize();
+
+        self.set_rotation(Quat::from_mat3(&Mat3::from_cols(right, up, forward)));
+    }
+
+    pub fn look_at(&mut self, point: Vec3) {
+        self.set_forward(point - self.position());
     }
 
     pub fn forward(&self) -> Vec3 {

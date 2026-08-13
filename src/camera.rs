@@ -27,7 +27,7 @@ impl Camera {
         2.0 * ((horizontal_fov.to_radians() * 0.5).tan() / aspect_ratio).atan()
     }
 
-    fn calculate_view_matrix(position: Vec3, forward: Vec3) -> Mat4 {
+    pub fn calculate_view_matrix(position: Vec3, forward: Vec3) -> Mat4 {
         let view_matrix_lh = if false {
             glam::Mat4::look_at_rh(position, position - forward, Transform::UP)
         } else {
@@ -48,15 +48,29 @@ impl Camera {
         &mut self.clipping_range
     }
 
-    pub fn new_perspective_camera(horizontal_fov: f32, aspect_ratio: f32, clipping_range: [f32; 2]) -> Self {
-        let transform = Transform::identity();
-
+    pub fn new_perspective_camera(
+        transform: &Transform,
+        horizontal_fov: f32,
+        aspect_ratio: f32,
+        clipping_range: [f32; 2],
+    ) -> Self {
         Self {
-            transform: transform,
+            transform: *transform,
             clipping_range: clipping_range,
             projection: CameraProjection::Perspective {
                 horizontal_fov,
                 aspect_ratio,
+            },
+        }
+    }
+
+    pub fn new_orthographic_camera(transform: &Transform, size: [f32; 2], clipping_range: [f32; 2]) -> Self {
+        Self {
+            transform: *transform,
+            clipping_range,
+            projection: CameraProjection::Orthographic {
+                width: size[0],
+                height: size[1],
             },
         }
     }
@@ -67,8 +81,17 @@ impl Camera {
 
     pub fn projection_matrix(&self) -> Mat4 {
         match self.projection {
-            CameraProjection::Orthographic { .. } => {
-                todo!()
+            CameraProjection::Orthographic { width, height } => {
+                let (half_width, half_height) = (width * 0.5f32, height * 0.5f32);
+
+                glam::Mat4::orthographic_rh_gl(
+                    -half_width,
+                    half_width,
+                    -half_height,
+                    half_height,
+                    self.clipping_range[0],
+                    self.clipping_range[1],
+                )
             }
             CameraProjection::Perspective {
                 horizontal_fov,
