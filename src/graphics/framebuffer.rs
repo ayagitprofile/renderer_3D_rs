@@ -58,7 +58,11 @@ impl Framebuffer {
             .expect("Create depth attachment before calling clear");
     }
 
-    pub fn create_depth_attachment(&mut self, storage_format: StorageFormat) -> &Texture2D {
+    pub fn create_depth_attachment(
+        &mut self,
+        storage_format: StorageFormat,
+        wrapping: graphics::texture::WrappingMode,
+    ) -> &Texture2D {
         assert!(storage_format.is_depth_format());
 
         let attachment_texture = graphics::texture::Texture2D::create_texture(
@@ -66,7 +70,7 @@ impl Framebuffer {
             self.res_y as i32,
             storage_format,
             graphics::texture::FilteringMode::Nearest,
-            graphics::texture::WrappingMode::Clamp,
+            wrapping,
             false,
         );
 

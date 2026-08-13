@@ -158,6 +158,8 @@ impl App {
             let rendering_stats = scene_renderer.prepare_rendering_data(scene, &self.camera);
             graphics::utility::poll_error("Render prep");
 
+            scene_renderer.new_frame();
+
             scene_renderer.render_shadow_pass(scene);
             graphics::utility::poll_error("Shadow pass");
 
@@ -228,6 +230,10 @@ impl App {
                         if ui.collapsing_header("Rendering", TreeNodeFlags::DEFAULT_OPEN) {
                             ui.text(format!("Object count: {}", rendering_stats.total_objects));
                             ui.text(format!("Visible objects: {}", rendering_stats.visible_objects));
+                            let mut shadows = scene_renderer.render_shadows();
+                            if ui.checkbox("Shadows", &mut shadows) {
+                                scene_renderer.set_render_shadows(shadows);
+                            }
                         }
                         if ui.collapsing_header("SSAO", TreeNodeFlags::DEFAULT_OPEN) {
                             let (rx, ry) = (

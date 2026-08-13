@@ -3,9 +3,9 @@
 #include "core_shader_data_buffer.glsl"
 #include "core_vertex_layout.glsl"
 #include "core_uniforms.glsl"
+#include "shadow_mapping_data.glsl"
 
 uniform sampler2D fb_normal_texture;
-uniform mat4 u_light_vp_matrix;
 
 out vec4 v_position_light_space;
 out vec3 v_position_ws;
@@ -48,7 +48,7 @@ void main() {
     v_TBN = TBN;
     v_uv = a_uv;
     v_position_ws = position_ws.xyz;
-    v_position_light_space = u_light_vp_matrix * position_ws;
+    v_position_light_space = CORE_WS_TO_LIGHT_SPACE_MATRIX * position_ws;
 }
 
 #shader frag
@@ -417,16 +417,36 @@ vec3 calculate_IBL(
 
 uniform sampler2D shadow_map;
 
-float sample_shadow_map(vec4 position_light_space) {
+float sample_shadow_map(vec4 position_light_space, vec3 normal_ws, vec3 light_dir_ws) {
     // perspective division and remapping from [-1;1] to [0;1]
-    vec3 proj_coords = (position_light_space.xyz / position_light_space.w) * 0.5 + 0.5;
+    vec3 proj_coords =
+        (position_light_space.xyz / position_light_space.w) * 0.5 + 0.5;
 
     // closest depth to light source
     float closest_depth = texture(shadow_map, proj_coords.xy).r;
 
+    // depth of surface point transformed from world space to light space
     float current_depth = proj_coords.z;
 
-    return current_depth > closest_depth ? 1.0 : 0.0;
+    float shadow = 0.0;
+    vec2 texel_size = 1.0 / textureSize(shadow_map, 0);
+
+    vec3 L = normalize(-light_dir_ws);
+    float ndotl = max(dot(normalize(normal_ws), L), 0.0);
+    float bias = 0.001 + 0.002 * (1.0 - ndotl);
+
+    const int samples_per_row = 3;
+    const int sample_count = samples_per_row * samples_per_row;
+
+    for (int i = 0; i < sample_count; i++) {
+        int x = (i % samples_per_row) - 1;
+        int y = (i / samples_per_row) - 1;
+
+        float pcf_depth = texture(shadow_map, proj_coords.xy + vec2(x, y) * texel_size).r;
+        shadow += float((current_depth - bias) > pcf_depth);
+    }
+
+    return shadow /= float(sample_count);
 }
 
 layout (location = 0) out vec4 out_color;
@@ -460,8 +480,6 @@ void main() {
 
     vec3 direct_light = vec3(0);
 
-    float dir_light_shadow = sample_shadow_map(v_position_light_space);
-
     for (uint i = 0; i < CORE_LIGHT_COUNT; i++) {
         Core_Light light = CORE_LIGHT_ARRAY[i];
 
@@ -469,7 +487,8 @@ void main() {
 
         switch (light_type) {
             case CORE_LIGHT_TYPE_DIRECTIONAL: {
-                direct_light += (1.0 - dir_light_shadow) * calculate_directional_light(light, N, V, albedo, metallic, roughness, F0);
+                float shadow = sample_shadow_map(v_position_light_space, N, light.direction.xyz);
+                direct_light += (1.0 - shadow) * calculate_directional_light(light, N, V, albedo, metallic, roughness, F0);
             } break;
 
             case CORE_LIGHT_TYPE_POINT: {

@@ -204,19 +204,6 @@ impl AmbientOcclusion {
         self.uniform_data.strength
     }
 
-    pub fn resize(&mut self, resolution: (u32, u32)) {
-        let output_texture = texture::Texture2D::create_texture(
-            resolution.0 as i32,
-            resolution.1 as i32,
-            texture::StorageFormat::R16F,
-            texture::FilteringMode::Nearest,
-            texture::WrappingMode::Clamp,
-            false,
-        );
-
-        self.output_texture = output_texture;
-    }
-
     pub fn enable_blur_pass(&mut self) -> &mut bool {
         &mut self.enable_blur_pass
     }

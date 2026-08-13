@@ -10,6 +10,7 @@ use crate::graphics::mesh::Mesh;
 use crate::graphics::shader::Shader;
 use crate::graphics::texture::{self, Texture, Texture2D};
 use crate::scene::light::LightType;
+use crate::scene::shadow_mapping::ShadowMapper;
 use crate::scene::skybox::Skybox;
 use crate::scene::value_range::{self, ValueRange};
 use crate::shader_source::ShaderSource;
@@ -38,8 +39,9 @@ pub struct Renderer {
     post_process_config_buffer: GraphicsBuffer,
 
     shadow_casters: Vec<DrawCallData>,
-    shadow_caster_ls_matrix: Option<Mat4>,
-    shadow_caster_shader: Shader,
+    shadow_mapper: super::shadow_mapping::ShadowMapper,
+
+    enable_shadows: bool,
 }
 
 #[repr(C)]
@@ -66,7 +68,6 @@ pub struct PostProcessingConfig {
 
 struct RenderTargets {
     render_framebuffer: Framebuffer,
-    shadow_framebuffer: Framebuffer,
 }
 
 #[derive(Clone, Copy)]
@@ -233,6 +234,14 @@ fn center_of_points(points: &[Vec3]) -> Vec3 {
 }
 
 impl Renderer {
+    pub fn set_render_shadows(&mut self, enable: bool) {
+        self.enable_shadows = enable;
+    }
+
+    pub fn render_shadows(&self) -> bool {
+        self.enable_shadows
+    }
+
     pub fn post_processing_config_mut(&mut self) -> &mut PostProcessingConfig {
         &mut self.post_process_config
     }
@@ -246,26 +255,6 @@ impl Renderer {
 
         let camera_frustum =
             CameraFrustum::from_view_projection_matrix(camera.projection_matrix() * camera.view_matrix());
-
-        if let Some(directinal_light) = scene
-            .lights
-            .lights()
-            .iter()
-            .find(|light| light.type_of_light == LightType::Directional)
-        {
-            let light_forward = Vec3::from_array(directinal_light.direction).normalize();
-
-            let (width, height) = (10f32, 10f32);
-            let (half_width, half_height) = (width * 0.5f32, height * 0.5f32);
-
-            let view_mat = Camera::calculate_view_matrix(light_forward * -10f32, light_forward);
-            let proj_mat =
-                glam::Mat4::orthographic_rh_gl(-half_width, half_width, -half_height, half_height, 0.1f32, 100f32);
-
-            self.shadow_caster_ls_matrix = Some(proj_mat * view_mat);
-        } else {
-            self.shadow_caster_ls_matrix = None;
-        }
 
         for root_node_id in scene.root_node_iter() {
             let root_node = scene.get_node(*root_node_id);
@@ -319,6 +308,40 @@ impl Renderer {
             }
         }
 
+        if let Some(directinal_light) = scene
+            .lights
+            .lights()
+            .iter()
+            .find(|light| light.type_of_light == LightType::Directional)
+        {
+            let light_forward = Vec3::from_array(directinal_light.direction).normalize();
+
+            // TODO! prperly calculate shadow caster ortho size to contain whole scene
+            let (width, height) = (15f32, 15f32);
+            let (half_width, half_height) = (width * 0.5f32, height * 0.5f32);
+
+            let light_position = light_forward * -10f32;
+
+            let view_mat = Camera::calculate_view_matrix(light_position, light_forward);
+            let proj_mat =
+                glam::Mat4::orthographic_rh_gl(-half_width, half_width, -half_height, half_height, 0.1f32, 100f32);
+
+            self.shadow_mapper
+                .set_uiform_buffer_ws_to_light_space_matrix(&(proj_mat * view_mat));
+
+            self.shadow_casters.sort_by(|a, b| {
+                let a_position = a.world_center;
+                let a_distance_to_camera = light_position.distance_squared(a_position);
+
+                let b_position = b.world_center;
+                let b_distance_to_camera = light_position.distance_squared(b_position);
+
+                a_distance_to_camera.total_cmp(&b_distance_to_camera)
+            });
+        } else {
+            self.shadow_casters.clear();
+        }
+
         let camera_position = camera.transform.position();
 
         self.opaque_object_draw_call_data.sort_by(|a, b| {
@@ -354,18 +377,20 @@ impl Renderer {
         (resolution.0 / 2, resolution.1 / 2)
     }
 
-    pub fn resize(&mut self, resolution: (u32, u32)) {
-        println!("Renderer.resize called");
+    fn shadow_map_resolution() -> (u32, u32) {
+        (1024, 1024)
+    }
 
-        self.render_targets = RenderTargets::new(resolution);
-        self.ambient_occlusion.resize(resolution);
+    pub fn new_frame(&self) {
+        self.render_targets.render_framebuffer.clear_depth_attachment();
+        self.shadow_mapper.framebuffer.clear_depth_attachment();
     }
 
     pub fn new(resolution: (u32, u32), scene: &Scene) -> Self {
         let depth_prepass_source =
             ShaderSource::load_from_file(std::path::Path::new("assets/shaders/depth_prepass_shader.glsl"));
 
-        let render_targets = RenderTargets::new(resolution);
+        let render_targets = RenderTargets::new(resolution, Renderer::shadow_map_resolution());
 
         let (ao_resolution_x, ao_resolution_y) = Renderer::calculate_ssao_resolution(resolution);
 
@@ -390,8 +415,6 @@ impl Renderer {
         let mut post_process_buffer = GraphicsBuffer::new();
 
         post_process_buffer.allocate(&[pp_config], graphics::buffer::Usage::Dynamic);
-
-        post_process_buffer.set_binding(graphics::buffer::BindingTarget::UniformBuffer, 1);
 
         let skybox = Skybox::new();
 
@@ -418,30 +441,24 @@ impl Renderer {
             post_process_config: pp_config,
             post_process_config_buffer: post_process_buffer,
 
-            shadow_caster_ls_matrix: None,
+            shadow_mapper: ShadowMapper::new((2048, 2048)),
 
-            shadow_caster_shader: ShaderSource::load_from_file(std::path::Path::new(
-                "assets/shaders/scene_shadow_caster_shader.glsl",
-            ))
-            .compile(),
+            enable_shadows: true,
         };
 
         renderer
     }
 
     pub fn render_shadow_pass(&self, scene: &Scene) {
-        if self.shadow_caster_ls_matrix.is_none() {
+        if self.shadow_casters.len() == 0 || !self.enable_shadows {
             return;
         }
 
-        self.render_targets.shadow_framebuffer.bind();
-        self.render_targets.shadow_framebuffer.clear_depth_attachment();
+        self.shadow_mapper.bind_uniform_buffer();
+        self.shadow_mapper.framebuffer.bind();
+        self.shadow_mapper.shadow_caster_shader.bind();
 
-        let shader = &self.shadow_caster_shader;
-
-        shader.bind();
-
-        graphics::utility::set_cull_mode(graphics::material_properties::CullMode::Disabled);
+        graphics::utility::set_cull_mode(graphics::material_properties::CullMode::Back);
         graphics::utility::set_depth_test_mode(graphics::material_properties::DepthTestMode::LessEqual);
         graphics::utility::set_depth_writing(true);
 
@@ -449,22 +466,13 @@ impl Renderer {
             gl::Disable(gl::BLEND);
         }
 
-        let model_matrix_uniform_location = shader.find_uniform_location("u_model_matrix").unwrap();
-
-        // let vp_matrix = shadow_camera.projection_matrix() * shadow_camera.view_matrix();
-
-        shader.set_uniform_mat4(
-            shader.find_uniform_location("u_light_vp_matrix").unwrap(),
-            &self.shadow_caster_ls_matrix.unwrap().to_cols_array(),
-        );
-
         for data in self.shadow_casters.iter() {
             let node = scene.get_node(data.node_id);
             let mesh = scene.get_mesh(node.mesh_id);
 
             mesh.vao().bind();
 
-            shader.set_uniform_mat4(model_matrix_uniform_location, &data.object_to_world.to_cols_array());
+            self.shadow_mapper.set_shader_os_to_ws_matrix(&data.object_to_world);
 
             unsafe {
                 gl::DrawElements(
@@ -479,7 +487,6 @@ impl Renderer {
 
     pub fn render_depth_prepass(&self, scene: &Scene) {
         self.render_targets.render_framebuffer.bind();
-        self.render_targets.render_framebuffer.clear_depth_attachment();
 
         self.render_targets
             .render_framebuffer
@@ -517,6 +524,7 @@ impl Renderer {
 
     pub fn render_forward_lighting(&mut self, scene: &Scene) {
         self.render_targets.render_framebuffer.bind();
+        self.shadow_mapper.bind_uniform_buffer();
 
         self.render_targets
             .render_framebuffer
@@ -542,13 +550,15 @@ impl Renderer {
         graphics::framebuffer::bind_default_framebuffer();
         let gpu_pp_config = GPUPostProcessConfig::from_cpu_config(&self.post_process_config);
 
+        self.post_process_config_buffer
+            .set_binding(graphics::buffer::BindingTarget::UniformBuffer, 1);
         self.post_process_config_buffer.upload_data(&[gpu_pp_config]);
 
         graphics::utility::try_set_bindless_texture(
             &self.post_process_fs_quad.shader,
             "shadow_map",
-            self.render_targets
-                .shadow_framebuffer
+            self.shadow_mapper
+                .framebuffer
                 .depth_attachment()
                 .unwrap()
                 .bindless_handle(),
@@ -612,18 +622,14 @@ impl Renderer {
         graphics::utility::try_set_bindless_texture(
             shader,
             super::textures::SHADOW_MAP,
-            self.render_targets
-                .shadow_framebuffer
+            self.shadow_mapper
+                .framebuffer
                 .depth_attachment()
                 .unwrap()
                 .bindless_handle(),
         );
 
         Renderer::upload_model_matrix(shader, model_matrix);
-
-        if let Some(location) = shader.find_uniform_location("u_light_vp_matrix") {
-            shader.set_uniform_mat4(location, &self.shadow_caster_ls_matrix.unwrap().to_cols_array());
-        }
 
         self.render_mesh(mesh, shader, &material.material_properties);
     }
@@ -663,10 +669,10 @@ impl RenderTargets {
             .unwrap()
     }
 
-    pub fn new(resolution: (u32, u32)) -> Self {
+    pub fn new(resolution: (u32, u32), shadow_map_resolution: (u32, u32)) -> Self {
         let mut render_framebuffer = Framebuffer::new(resolution);
 
-        render_framebuffer.create_depth_attachment(texture::StorageFormat::Depth24);
+        render_framebuffer.create_depth_attachment(texture::StorageFormat::Depth24, texture::WrappingMode::Clamp);
         render_framebuffer.create_color_attachment(
             RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX,
             texture::StorageFormat::SRGBA,
@@ -678,13 +684,10 @@ impl RenderTargets {
             texture::FilteringMode::Nearest,
         );
 
-        let mut shadow_framebuffer = Framebuffer::new(resolution);
+        let mut shadow_framebuffer = Framebuffer::new(shadow_map_resolution);
 
-        shadow_framebuffer.create_depth_attachment(texture::StorageFormat::Depth32);
+        shadow_framebuffer.create_depth_attachment(texture::StorageFormat::Depth32, texture::WrappingMode::Clamp);
 
-        Self {
-            render_framebuffer,
-            shadow_framebuffer,
-        }
+        Self { render_framebuffer }
     }
 }

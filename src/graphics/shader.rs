@@ -7,7 +7,7 @@ struct UniformData {
     location: i32,
 }
 
-type UniformDataStorage = smallvec::SmallVec<[UniformData; 6]>;
+type UniformDataStorage = smallvec::SmallVec<[UniformData; 10]>;
 
 #[derive(Clone, Copy)]
 #[repr(u32)]

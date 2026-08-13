@@ -11,3 +11,4 @@ pub mod scene_controller;
 pub mod skybox;
 pub mod textures;
 pub mod value_range;
+pub mod shadow_mapping;

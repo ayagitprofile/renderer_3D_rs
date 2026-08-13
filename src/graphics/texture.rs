@@ -13,6 +13,7 @@ pub enum FilteringMode {
 pub enum WrappingMode {
     Repeat,
     Clamp,
+    ClampWithBorderColor { color: [f32; 4] },
 }
 
 #[repr(u32)]
@@ -572,14 +573,19 @@ impl Texture2D {
             "Cant call functions that modify texture's sampler if the bindless handle for this texture has been generated, because the sampler becomes immutable, if you want to modify the sampler of a bindless texture, use sampler object"
         );
 
-        let mode = match wrapping {
-            WrappingMode::Clamp => gl::CLAMP_TO_EDGE,
-            WrappingMode::Repeat => gl::REPEAT,
+        let (mode, color) = match wrapping {
+            WrappingMode::Clamp => (gl::CLAMP_TO_EDGE, [0f32; 4]),
+            WrappingMode::Repeat => (gl::REPEAT, [0f32; 4]),
+            WrappingMode::ClampWithBorderColor { color } => (gl::CLAMP_TO_BORDER, color),
         };
 
         unsafe {
             gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_S, mode as i32);
             gl::TextureParameteri(self.id(), gl::TEXTURE_WRAP_T, mode as i32);
+
+            if mode == gl::CLAMP_TO_BORDER {
+                gl::TextureParameterfv(self.id(), gl::TEXTURE_BORDER_COLOR, color.as_ptr());
+            }
         }
     }
 }

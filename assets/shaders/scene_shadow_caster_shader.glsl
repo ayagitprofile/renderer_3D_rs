@@ -6,12 +6,13 @@ Cull Back
 ZWrite On
 ZTest LEqual
 
-uniform mat4 u_light_vp_matrix;
+#include "shadow_mapping_data.glsl"
+
 uniform mat4 u_model_matrix;
 
 void main() {
     vec4 position_ws = u_model_matrix * vec4(a_position, 1.0);
-    vec4 position_cs = u_light_vp_matrix * position_ws;
+    vec4 position_cs = CORE_WS_TO_LIGHT_SPACE_MATRIX * position_ws;
     gl_Position = position_cs;
 }
 
