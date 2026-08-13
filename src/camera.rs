@@ -3,11 +3,23 @@ use glam::{Mat4, Vec3, vec3};
 
 use crate::transform::Transform;
 
+pub enum CameraProjection {
+    Perspective { horizontal_fov: f32, aspect_ratio: f32 },
+    Orthographic { width: f32, height: f32 },
+}
+
+impl CameraProjection {
+    pub fn set_aspect_ratio(&mut self, value: f32) {
+        if let CameraProjection::Perspective { aspect_ratio, .. } = self {
+            *aspect_ratio = value;
+        }
+    }
+}
+
 pub struct Camera {
     pub transform: Transform,
-    pub horizontal_fov: f32,
     pub clipping_range: [f32; 2],
-    pub aspect_ratio: f32,
+    pub projection: CameraProjection,
 }
 
 impl Camera {
@@ -36,14 +48,16 @@ impl Camera {
         &mut self.clipping_range
     }
 
-    pub fn new(fov: f32, aspect_ratio: f32, clipping_range: [f32; 2]) -> Self {
+    pub fn new_perspective_camera(horizontal_fov: f32, aspect_ratio: f32, clipping_range: [f32; 2]) -> Self {
         let transform = Transform::identity();
 
         Self {
             transform: transform,
-            horizontal_fov: fov,
             clipping_range: clipping_range,
-            aspect_ratio: aspect_ratio,
+            projection: CameraProjection::Perspective {
+                horizontal_fov,
+                aspect_ratio,
+            },
         }
     }
 
@@ -52,11 +66,19 @@ impl Camera {
     }
 
     pub fn projection_matrix(&self) -> Mat4 {
-        Camera::calculate_projection_matrix(
-            self.horizontal_fov,
-            self.aspect_ratio,
-            self.clipping_range[0],
-            self.clipping_range[1],
-        )
+        match self.projection {
+            CameraProjection::Orthographic { .. } => {
+                todo!()
+            }
+            CameraProjection::Perspective {
+                horizontal_fov,
+                aspect_ratio,
+            } => Camera::calculate_projection_matrix(
+                horizontal_fov,
+                aspect_ratio,
+                self.clipping_range[0],
+                self.clipping_range[1],
+            ),
+        }
     }
 }

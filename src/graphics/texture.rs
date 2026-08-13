@@ -16,7 +16,7 @@ pub enum WrappingMode {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum StorageFormat {
     R = gl::R8,
     RG = gl::RG8,

@@ -96,7 +96,9 @@ impl App {
                     Event::Window { win_event, .. } => match win_event {
                         sdl2::event::WindowEvent::Resized(..) => {
                             resize_viewport(&self.sdl_window);
-                            self.camera.aspect_ratio = get_window_aspect_ratio(&self.sdl_window);
+                            self.camera
+                                .projection
+                                .set_aspect_ratio(get_window_aspect_ratio(&self.sdl_window));
                             scene_renderer =
                                 scene::renderer::Renderer::new(self.sdl_window.size(), scene_controller.scene())
                         }
@@ -154,16 +156,22 @@ impl App {
             let scene = scene_controller.scene();
 
             let rendering_stats = scene_renderer.prepare_rendering_data(scene, &self.camera);
+            graphics::utility::poll_error("Render prep");
 
             scene_renderer.new_frame();
+            graphics::utility::poll_error("New frame");
 
             scene_renderer.render_depth_prepass(scene);
+            graphics::utility::poll_error("Depth prepass");
 
             scene_renderer.ssao().compute_ambient_occlusion();
+            graphics::utility::poll_error("SSAO pass");
 
             scene_renderer.render_forward_lighting(scene);
+            graphics::utility::poll_error("Forward pass");
 
             scene_renderer.render_post_processing();
+            graphics::utility::poll_error("Post process pass");
 
             if draw_gizmos {
                 for light in scene_controller.scene().lights.lights() {
@@ -353,7 +361,7 @@ impl App {
             time_last_frame: now,
             time_on_app_startup: now,
             input_container: input::InputContainer::new(),
-            camera: camera::Camera::new(90f32, window_aspect_ratio, [0.1f32, 100f32]),
+            camera: camera::Camera::new_perspective_camera(90f32, window_aspect_ratio, [0.1f32, 100f32]),
         }
     }
 

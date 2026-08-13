@@ -1,6 +1,6 @@
 use crate::{
     gl::{self},
-    graphics::texture::StorageFormat,
+    graphics::texture::{StorageFormat, Texture, Texture2D},
 };
 
 #[derive(Clone, Copy)]
@@ -19,21 +19,17 @@ const CLEAR_COLOR: [f32; 4] = [0f32; 4];
 impl Framebuffer {
     pub const MAX_RENDER_TARGETS: usize = 6;
 
-    pub fn set_depth_texture_render_target(&mut self, texture_id: u32, storage_format: StorageFormat) {
-        let (attachment, clear_target) = match storage_format {
-            StorageFormat::Depth16F | StorageFormat::Depth24F | StorageFormat::Depth32F => {
-                (gl::DEPTH_ATTACHMENT, gl::DEPTH)
-            }
-            StorageFormat::Depth24FStencil | StorageFormat::Depth32FStencil => {
-                (gl::DEPTH_STENCIL_ATTACHMENT, gl::DEPTH_STENCIL)
-            }
-            _ => panic!("Incorrect storage format for a depth texture"),
-        };
+    pub fn set_depth_texture_render_target(&mut self, texture: &Texture2D) {
+        assert!(
+            texture.storage_format() == StorageFormat::Depth16F
+                || texture.storage_format() == StorageFormat::Depth24F
+                || texture.storage_format() == StorageFormat::Depth32F
+        );
 
-        self.depth_target = Some((RenderTarget::Texture2D { id: texture_id }, clear_target));
+        self.depth_target = Some((RenderTarget::Texture2D { id: texture.id() }, gl::DEPTH));
 
         unsafe {
-            gl::NamedFramebufferTexture(self.id, attachment, texture_id, 0);
+            gl::NamedFramebufferTexture(self.id, gl::DEPTH_ATTACHMENT, texture.id(), 0);
         }
     }
 
@@ -105,11 +101,15 @@ impl Framebuffer {
         assert!(self.is_complete());
         const COLOR: [f32; 4] = [0f32; 4];
 
-        let clear_target = self.depth_target.unwrap().1;
-
         unsafe {
+            let clear_target = self.depth_target.unwrap().1;
             gl::DepthMask(gl::TRUE);
-            gl::ClearNamedFramebufferfi(self.id, clear_target, 0, 1.0f32, 0);
+            if clear_target == gl::DEPTH {
+                let depth = 1.0f32;
+                gl::ClearNamedFramebufferfv(self.id, clear_target, 0, &depth as *const f32);
+            } else {
+                gl::ClearNamedFramebufferfi(self.id, clear_target, 0, 1.0f32, 0);
+            }
         }
 
         let mut render_attachments = [0u32; Framebuffer::MAX_RENDER_TARGETS];

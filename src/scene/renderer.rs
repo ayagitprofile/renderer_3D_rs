@@ -64,6 +64,9 @@ struct RenderTargets {
     color_texture: texture::Texture2D,
     depth_texture: texture::Texture2D,
     normal_texture: texture::Texture2D,
+
+    shadow_pass_framebuffer: Framebuffer,
+    shadow_map: texture::Texture2D,
 }
 
 struct DrawCallData {
@@ -509,7 +512,7 @@ impl RenderTargets {
         let depth_texture = texture::Texture2D::create_texture(
             width,
             height,
-            texture::StorageFormat::Depth24FStencil,
+            texture::StorageFormat::Depth24F,
             texture::FilteringMode::Nearest,
             texture::WrappingMode::Clamp,
             false,
@@ -532,8 +535,7 @@ impl RenderTargets {
         self.depth_texture = depth;
         self.normal_texture = normal;
 
-        self.framebuffer
-            .set_depth_texture_render_target(self.depth_texture.id(), self.depth_texture.storage_format());
+        self.framebuffer.set_depth_texture_render_target(&self.depth_texture);
         self.framebuffer
             .set_color_texture_render_target(self.color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
         self.framebuffer
@@ -550,8 +552,7 @@ impl RenderTargets {
         self.depth_texture = depth_texture;
         self.normal_texture = normal_texture;
 
-        self.framebuffer
-            .set_depth_texture_render_target(self.depth_texture.id(), self.depth_texture.storage_format());
+        self.framebuffer.set_depth_texture_render_target(&self.depth_texture);
         self.framebuffer
             .set_color_texture_render_target(self.color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
         self.framebuffer
@@ -564,16 +565,31 @@ impl RenderTargets {
 
         let mut framebuffer = Framebuffer::new();
 
-        framebuffer.set_depth_texture_render_target(depth_texture.id(), depth_texture.storage_format());
+        framebuffer.set_depth_texture_render_target(&depth_texture);
         framebuffer.set_color_texture_render_target(color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
         framebuffer
             .set_color_texture_render_target(normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
+
+        let mut shadow_framebuffer = Framebuffer::new();
+
+        let shadow_map_texture = texture::Texture2D::create_texture(
+            resolution.0 as i32,
+            resolution.1 as i32,
+            texture::StorageFormat::Depth16F,
+            texture::FilteringMode::Nearest,
+            texture::WrappingMode::Clamp,
+            false,
+        );
+
+        shadow_framebuffer.set_depth_texture_render_target(&shadow_map_texture);
 
         Self {
             framebuffer,
             color_texture,
             depth_texture,
             normal_texture,
+            shadow_map: shadow_map_texture,
+            shadow_pass_framebuffer: shadow_framebuffer,
         }
     }
 }
