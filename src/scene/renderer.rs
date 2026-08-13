@@ -8,7 +8,7 @@ use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::material_properties::{MaterialProperties, SurfaceType};
 use crate::graphics::mesh::Mesh;
 use crate::graphics::shader::Shader;
-use crate::graphics::texture::{self, Texture};
+use crate::graphics::texture::{self, Texture, Texture2D};
 use crate::scene::skybox::Skybox;
 use crate::scene::value_range::{self, ValueRange};
 use crate::shader_source::ShaderSource;
@@ -59,14 +59,15 @@ pub struct PostProcessingConfig {
 }
 
 struct RenderTargets {
-    framebuffer: Framebuffer,
+    // framebuffer: Framebuffer,
 
-    color_texture: texture::Texture2D,
-    depth_texture: texture::Texture2D,
-    normal_texture: texture::Texture2D,
+    // color_texture: texture::Texture2D,
+    // depth_texture: texture::Texture2D,
+    // normal_texture: texture::Texture2D,
 
-    shadow_pass_framebuffer: Framebuffer,
-    shadow_map: texture::Texture2D,
+    // shadow_pass_framebuffer: Framebuffer,
+    // shadow_map: texture::Texture2D,
+    render_framebuffer: Framebuffer,
 }
 
 struct DrawCallData {
@@ -302,7 +303,7 @@ impl Renderer {
         let (ao_resolution_x, ao_resolution_y) = Renderer::calculate_ssao_resolution(resolution);
 
         let ao = ambient_occlusion::AmbientOcclusion::new(ao_resolution_x, ao_resolution_y);
-        ao.set_input_textures(&render_targets.depth_texture, &render_targets.normal_texture);
+        ao.set_input_textures(&render_targets.depth_texture(), &render_targets.normal_texture());
 
         let fs_quad = graphics::fullscreen_quad::FullscreenQuad::new(std::path::Path::new(
             "assets/shaders/post_process_shader.glsl",
@@ -311,7 +312,7 @@ impl Renderer {
         graphics::utility::try_set_bindless_texture(
             &fs_quad.shader,
             super::textures::FRAMEBUFFER_COLOR_TEXTURE,
-            render_targets.color_texture.bindless_handle(),
+            render_targets.color_texture().bindless_handle(),
         );
 
         let pp_config = PostProcessingConfig {
@@ -353,7 +354,7 @@ impl Renderer {
 
     pub fn render_depth_prepass(&self, scene: &Scene) {
         self.render_targets
-            .framebuffer
+            .render_framebuffer
             .set_active_render_target(RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
 
         let shader = &self.depth_prepass_shader.0;
@@ -388,7 +389,7 @@ impl Renderer {
 
     pub fn render_forward_lighting(&mut self, scene: &Scene) {
         self.render_targets
-            .framebuffer
+            .render_framebuffer
             .set_active_render_target(RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
 
         for data in self.opaque_object_draw_call_data.iter() {
@@ -480,8 +481,8 @@ impl Renderer {
     }
 
     pub fn new_frame(&self) {
-        self.render_targets.framebuffer.clear_all_attachments();
-        self.render_targets.framebuffer.bind();
+        self.render_targets.render_framebuffer.clear_depth_attachment();
+        self.render_targets.render_framebuffer.bind();
     }
 
     pub fn ssao_mut(&mut self) -> &mut AmbientOcclusion {
@@ -497,99 +498,37 @@ impl RenderTargets {
     pub const COLOR_TEXTURE_ATTACHMENT_INDEX: usize = 0;
     pub const NORMAL_TEXTURE_ATTACHMENT_INDEX: usize = 1;
 
-    fn create_texture_set(width: u32, height: u32) -> (texture::Texture2D, texture::Texture2D, texture::Texture2D) {
-        let (width, height) = (width as i32, height as i32);
-
-        let color_texture = texture::Texture2D::create_texture(
-            width,
-            height,
-            texture::StorageFormat::SRGBA,
-            texture::FilteringMode::Bilinear,
-            texture::WrappingMode::Clamp,
-            false,
-        );
-
-        let depth_texture = texture::Texture2D::create_texture(
-            width,
-            height,
-            texture::StorageFormat::Depth24F,
-            texture::FilteringMode::Nearest,
-            texture::WrappingMode::Clamp,
-            false,
-        );
-
-        let normal_texture = texture::Texture2D::create_texture(
-            width,
-            height,
-            texture::StorageFormat::RG16F,
-            texture::FilteringMode::Nearest,
-            texture::WrappingMode::Clamp,
-            false,
-        );
-
-        (color_texture, depth_texture, normal_texture)
+    pub fn depth_texture(&self) -> &Texture2D {
+        self.render_framebuffer.depth_attachment().unwrap()
     }
 
-    fn attach_textures(&mut self, color: texture::Texture2D, depth: texture::Texture2D, normal: texture::Texture2D) {
-        self.color_texture = color;
-        self.depth_texture = depth;
-        self.normal_texture = normal;
-
-        self.framebuffer.set_depth_texture_render_target(&self.depth_texture);
-        self.framebuffer
-            .set_color_texture_render_target(self.color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
-        self.framebuffer
-            .set_color_texture_render_target(self.normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
+    pub fn color_texture(&self) -> &Texture2D {
+        self.render_framebuffer
+            .color_attachment(RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX)
+            .unwrap()
     }
 
-    pub fn resize(&mut self, resolution: (u32, u32)) {
-        println!("Resize called");
-
-        let (color_texture, depth_texture, normal_texture) =
-            RenderTargets::create_texture_set(resolution.0, resolution.1);
-
-        self.color_texture = color_texture;
-        self.depth_texture = depth_texture;
-        self.normal_texture = normal_texture;
-
-        self.framebuffer.set_depth_texture_render_target(&self.depth_texture);
-        self.framebuffer
-            .set_color_texture_render_target(self.color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
-        self.framebuffer
-            .set_color_texture_render_target(self.normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
+    pub fn normal_texture(&self) -> &Texture2D {
+        self.render_framebuffer
+            .color_attachment(RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX)
+            .unwrap()
     }
 
     pub fn new(resolution: (u32, u32)) -> Self {
-        let (color_texture, depth_texture, normal_texture) =
-            RenderTargets::create_texture_set(resolution.0, resolution.1);
+        let mut render_framebuffer = Framebuffer::new(resolution);
 
-        let mut framebuffer = Framebuffer::new();
-
-        framebuffer.set_depth_texture_render_target(&depth_texture);
-        framebuffer.set_color_texture_render_target(color_texture.id(), RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX);
-        framebuffer
-            .set_color_texture_render_target(normal_texture.id(), RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX);
-
-        let mut shadow_framebuffer = Framebuffer::new();
-
-        let shadow_map_texture = texture::Texture2D::create_texture(
-            resolution.0 as i32,
-            resolution.1 as i32,
-            texture::StorageFormat::Depth16F,
+        render_framebuffer.create_depth_attachment(texture::StorageFormat::Depth24F);
+        render_framebuffer.create_color_attachment(
+            RenderTargets::COLOR_TEXTURE_ATTACHMENT_INDEX,
+            texture::StorageFormat::SRGBA,
             texture::FilteringMode::Nearest,
-            texture::WrappingMode::Clamp,
-            false,
+        );
+        render_framebuffer.create_color_attachment(
+            RenderTargets::NORMAL_TEXTURE_ATTACHMENT_INDEX,
+            texture::StorageFormat::RG16F,
+            texture::FilteringMode::Nearest,
         );
 
-        shadow_framebuffer.set_depth_texture_render_target(&shadow_map_texture);
-
-        Self {
-            framebuffer,
-            color_texture,
-            depth_texture,
-            normal_texture,
-            shadow_map: shadow_map_texture,
-            shadow_pass_framebuffer: shadow_framebuffer,
-        }
+        Self { render_framebuffer }
     }
 }

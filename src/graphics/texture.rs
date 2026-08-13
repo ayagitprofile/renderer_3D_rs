@@ -54,6 +54,20 @@ impl PixelDataType {
 }
 
 impl StorageFormat {
+    pub fn is_depth_format(&self) -> bool {
+        match self {
+            StorageFormat::Depth16F | StorageFormat::Depth24F | StorageFormat::Depth32F => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_depth_stencil_fromat(&self) -> bool {
+        match self {
+            StorageFormat::Depth24FStencil | StorageFormat::Depth32FStencil => true,
+            _ => false,
+        }
+    }
+
     pub fn to_gl_format(&self) -> u32 {
         *self as u32
     }
