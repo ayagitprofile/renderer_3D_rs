@@ -29,3 +29,5 @@ rustc-ice-*.txt
 
 !/assets/textures/
 !/assets/textures/**
+
+!/assets/scenes/
