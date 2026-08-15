@@ -511,17 +511,29 @@ impl Scene {
         if shader
             .find_uniform_location(super::textures::ALBEDO_TEXTURE_NAME)
             .is_some()
-            && let Some(texture) = pbr.base_color_texture()
         {
-            let gltf_image = &images[texture.texture().source().index()];
+            let texture = if let Some(texture) = pbr.base_color_texture() {
+                let gltf_image = &images[texture.texture().source().index()];
 
-            let texture = NamedTexture {
-                texture: Scene::texture_from_gltf_image(
-                    gltf_image,
-                    graphics::texture::StorageFormat::RGBA,
-                    graphics::texture::FilteringMode::AnisotropicX16,
-                ),
-                name: super::textures::ALBEDO_TEXTURE_NAME.to_smolstr(),
+                NamedTexture {
+                    texture: Scene::texture_from_gltf_image(
+                        gltf_image,
+                        graphics::texture::StorageFormat::RGBA,
+                        graphics::texture::FilteringMode::AnisotropicX16,
+                    ),
+                    name: super::textures::ALBEDO_TEXTURE_NAME.to_smolstr(),
+                }
+            } else {
+                NamedTexture {
+                    texture: graphics::texture::Texture2D::create_single_color_texture(
+                        4,
+                        4,
+                        graphics::texture::StorageFormat::RGBA,
+                        &pbr.base_color_factor(),
+                        graphics::texture::FilteringMode::AnisotropicX16,
+                    ),
+                    name: super::textures::ALBEDO_TEXTURE_NAME.to_smolstr(),
+                }
             };
 
             added_textures.push(texture);
@@ -529,17 +541,29 @@ impl Scene {
         if shader
             .find_uniform_location(super::textures::NORMAL_TEXTURE_NAME)
             .is_some()
-            && let Some(texture_info) = gltf_material.normal_texture()
         {
-            let gltf_image = &images[texture_info.texture().source().index()];
+            let texture = if let Some(texture_info) = gltf_material.normal_texture() {
+                let gltf_image = &images[texture_info.texture().source().index()];
 
-            let texture = NamedTexture {
-                texture: Scene::texture_from_gltf_image(
-                    gltf_image,
-                    graphics::texture::StorageFormat::RGB,
-                    graphics::texture::FilteringMode::AnisotropicX16,
-                ),
-                name: super::textures::NORMAL_TEXTURE_NAME.to_smolstr(),
+                NamedTexture {
+                    texture: Scene::texture_from_gltf_image(
+                        gltf_image,
+                        graphics::texture::StorageFormat::RGB,
+                        graphics::texture::FilteringMode::AnisotropicX16,
+                    ),
+                    name: super::textures::NORMAL_TEXTURE_NAME.to_smolstr(),
+                }
+            } else {
+                NamedTexture {
+                    texture: graphics::texture::Texture2D::create_single_color_texture(
+                        4,
+                        4,
+                        graphics::texture::StorageFormat::RGB,
+                        &[0f32, 0f32, 1f32, 0f32],
+                        graphics::texture::FilteringMode::AnisotropicX16,
+                    ),
+                    name: super::textures::NORMAL_TEXTURE_NAME.to_smolstr(),
+                }
             };
 
             added_textures.push(texture);
@@ -547,17 +571,31 @@ impl Scene {
         if shader
             .find_uniform_location(super::textures::METALLIC_ROUGHNESS_TEXTURE_NAME)
             .is_some()
-            && let Some(texture_info) = pbr.metallic_roughness_texture()
         {
-            let gltf_image = &images[texture_info.texture().source().index()];
+            let texture = if let Some(texture_info) = pbr.metallic_roughness_texture() {
+                let gltf_image = &images[texture_info.texture().source().index()];
 
-            let texture = NamedTexture {
-                texture: Scene::texture_from_gltf_image(
-                    gltf_image,
-                    graphics::texture::StorageFormat::RGB,
-                    graphics::texture::FilteringMode::AnisotropicX16,
-                ),
-                name: super::textures::METALLIC_ROUGHNESS_TEXTURE_NAME.to_smolstr(),
+                NamedTexture {
+                    texture: Scene::texture_from_gltf_image(
+                        gltf_image,
+                        graphics::texture::StorageFormat::RGB,
+                        graphics::texture::FilteringMode::AnisotropicX16,
+                    ),
+                    name: super::textures::METALLIC_ROUGHNESS_TEXTURE_NAME.to_smolstr(),
+                }
+            } else {
+                let g_channel = pbr.roughness_factor();
+                let b_channel = pbr.metallic_factor();
+                NamedTexture {
+                    texture: graphics::texture::Texture2D::create_single_color_texture(
+                        4,
+                        4,
+                        graphics::texture::StorageFormat::RGB,
+                        &[0f32, g_channel, b_channel, 0f32],
+                        graphics::texture::FilteringMode::AnisotropicX16,
+                    ),
+                    name: super::textures::METALLIC_ROUGHNESS_TEXTURE_NAME.to_smolstr(),
+                }
             };
 
             added_textures.push(texture);

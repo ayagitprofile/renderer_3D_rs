@@ -61,6 +61,7 @@ impl DebugGizmoRenderer {
             shader.find_uniform_location("u_color").unwrap(),
             &[color.x, color.y, color.z, 0.5f32],
         );
+        shader.bind();
 
         {
             let mut transform = Transform::from_model_matrix(Mat4::from_scale_rotation_translation(
@@ -88,7 +89,6 @@ impl DebugGizmoRenderer {
             }
         }
 
-        shader.bind();
         {
             let mut transform = Transform::from_model_matrix(Mat4::from_scale_rotation_translation(
                 Vec3::ONE * 0.5f32,
